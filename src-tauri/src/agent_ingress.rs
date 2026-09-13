@@ -153,11 +153,12 @@ pub struct AvatarRpcRequest {
 
 /// Validates and parses a raw HTTP request into an `AgentEventPayload`.
 ///
-/// Returns `Err(400)` if method is not POST, path (before any query string) is
-/// not `/agent-event`, or the body is not valid JSON for `AgentEventPayload`.
+/// Returns `Err(405)` when the method is not POST, and `Err(400)` when the path
+/// (before any query string) is not `/agent-event` or the body is not valid JSON
+/// for `AgentEventPayload`.
 fn parse_request(method: &str, path: &str, body: &str) -> Result<AgentEventPayload, u16> {
     if method != "POST" {
-        return Err(400);
+        return Err(405);
     }
     let path_only = path.split('?').next().unwrap_or(path);
     if path_only != "/agent-event" {
@@ -168,12 +169,13 @@ fn parse_request(method: &str, path: &str, body: &str) -> Result<AgentEventPaylo
 
 /// Validates and parses a raw HTTP request into a `signals` array.
 ///
-/// Returns `Err(400)` if method is not POST, path (before any query string) is
-/// not `/signals`, or the body is not valid JSON shaped `{"signals": [...]}`.
-/// Each element of `signals` is passed through as opaque JSON.
+/// Returns `Err(405)` when the method is not POST, and `Err(400)` when the path
+/// (before any query string) is not `/signals` or the body is not valid JSON
+/// shaped `{"signals": [...]}`. Each element of `signals` is passed through as
+/// opaque JSON.
 fn parse_signals_request(method: &str, path: &str, body: &str) -> Result<SignalsRequest, u16> {
     if method != "POST" {
-        return Err(400);
+        return Err(405);
     }
     let path_only = path.split('?').next().unwrap_or(path);
     if path_only != "/signals" {
@@ -184,8 +186,9 @@ fn parse_signals_request(method: &str, path: &str, body: &str) -> Result<Signals
 
 /// Validates and parses a raw HTTP request into an `AvatarRoute`.
 ///
-/// Returns `Err(404)` for an unknown `/avatar/*` path, and `Err(400)` when the path
-/// exists but the method or the command body does not fit it.
+/// Returns `Err(405)` for a known `/avatar/*` path with the wrong method, `Err(404)`
+/// for an unknown `/avatar/*` path, and `Err(400)` when the command body does not
+/// fit the route.
 fn parse_avatar_request(method: &str, path: &str, body: &str) -> Result<AvatarRoute, u16> {
     let path_only = path.split('?').next().unwrap_or(path);
     match path_only {
@@ -204,7 +207,16 @@ fn method_gate(method: &str, expected: &str) -> Result<(), u16> {
     if method == expected {
         Ok(())
     } else {
-        Err(400)
+        Err(405)
+    }
+}
+
+/// A method mismatch on an existing path is routine (reachability probes); other rejections are not.
+fn rejected_level(code: u16) -> log::Level {
+    if code == 405 {
+        log::Level::Debug
+    } else {
+        log::Level::Warn
     }
 }
 
@@ -417,7 +429,10 @@ fn handle_request(app: &AppHandle, mut request: tiny_http::Request) {
             Err(code) => {
                 let _ =
                     request.respond(tiny_http::Response::from_string("").with_status_code(code));
-                log::warn!("agent_ingress_rejected code={code} method={method} url={url}");
+                log::log!(
+                    rejected_level(code),
+                    "agent_ingress_rejected code={code} method={method} url={url}"
+                );
             }
         }
         return;
@@ -444,7 +459,10 @@ fn handle_request(app: &AppHandle, mut request: tiny_http::Request) {
         }
         Err(code) => {
             let _ = request.respond(tiny_http::Response::from_string("").with_status_code(code));
-            log::warn!("agent_ingress_rejected code={code} method={method} url={url}");
+            log::log!(
+                rejected_level(code),
+                "agent_ingress_rejected code={code} method={method} url={url}"
+            );
         }
     }
 }
@@ -565,10 +583,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_request_wrong_method_returns_400() {
+    fn parse_request_wrong_method_returns_405() {
         assert_eq!(
             parse_request("GET", "/agent-event", valid_body()).unwrap_err(),
-            400
+            405
         );
     }
 
@@ -734,10 +752,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_signals_request_wrong_method_returns_400() {
+    fn parse_signals_request_wrong_method_returns_405() {
         assert_eq!(
             parse_signals_request("GET", "/signals", valid_signals_body()).unwrap_err(),
-            400
+            405
         );
     }
 
@@ -861,7 +879,7 @@ mod tests {
         );
         assert_eq!(
             parse_avatar_request("POST", "/avatar/state", "").unwrap_err(),
-            400
+            405
         );
     }
 
@@ -873,7 +891,7 @@ mod tests {
         );
         assert_eq!(
             parse_avatar_request("POST", "/avatar/perch-targets", "").unwrap_err(),
-            400
+            405
         );
     }
 
@@ -894,11 +912,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_avatar_known_path_wrong_method_returns_400() {
-        // The route exists, the method does not — a client error, not a missing resource.
+    fn parse_avatar_known_path_wrong_method_returns_405() {
+        // The route exists, the method does not — a method mismatch, not a missing resource.
         assert_eq!(
             parse_avatar_request("DELETE", "/avatar/state", "").unwrap_err(),
-            400
+            405
         );
     }
 
@@ -907,7 +925,7 @@ mod tests {
         assert_eq!(
             parse_avatar_request("GET", "/avatar/command", r#"{"action":"stand_down"}"#)
                 .unwrap_err(),
-            400
+            405
         );
     }
 
@@ -1038,6 +1056,15 @@ mod tests {
                 .unwrap_err(),
             400
         );
+    }
+
+    // ── rejected_level ──────────────────────────────────────────────────
+
+    #[test]
+    fn rejected_level_is_debug_for_a_method_mismatch_and_warn_otherwise() {
+        assert_eq!(rejected_level(405), log::Level::Debug);
+        assert_eq!(rejected_level(400), log::Level::Warn);
+        assert_eq!(rejected_level(404), log::Level::Warn);
     }
 
     // ── RPC request payload ───────────────────────────────────────────────────
