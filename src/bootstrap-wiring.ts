@@ -29,9 +29,11 @@ import type { Guardrails, GuardrailsConfig } from "./dispatcher/guardrails";
 import { createMilestoneSource, type MilestoneSource } from "./dispatcher/milestone-source";
 import type { ProactivePacer } from "./dispatcher/proactive-pacer";
 import { createProactiveSource, type ProactiveSource } from "./dispatcher/proactive-source";
+import { createRenderTurn } from "./dispatcher/render-turn";
 import { createScheduleSource, type ScheduleSource } from "./dispatcher/schedule-source";
 import { createScreenSource, type ScreenSource } from "./dispatcher/screen-source";
 import { createSignalsSource, type SignalsSource } from "./dispatcher/signals-source";
+import type { TurnOutput } from "./dispatcher/turn-output";
 import type { UserInputSource } from "./dispatcher/user-input-source";
 import type { AgentNotifySettings } from "./io/agent-notify-settings";
 import { resolveAssetUrl, resolveUserFileSrc } from "./io/asset-url";
@@ -45,12 +47,15 @@ import {
 } from "./io/broker-client";
 import { createBrokerOverrideReconciler } from "./io/broker-override-reconciler";
 import { selectFetch } from "./io/chat-client";
+import type { ChatHistoryEntry } from "./io/chat-history-store";
+import type { DelegationsStore } from "./io/delegations-store";
 import { type EndpointOverrides, mergeEndpoints } from "./io/endpoints-settings";
 import type { ExpressMotionSettings } from "./io/express-motion-settings";
 import type { GuardrailsSettingsStore } from "./io/guardrails-settings";
 import { attachKeepOnScreen, type KeepOnScreenHandle } from "./io/keep-on-screen";
 import type { ClampedIntSettingsStore } from "./io/persisted-store";
 import type { ProactiveSettings } from "./io/proactive-settings";
+import type { DelegationItem, PushSocket, RenderFrame } from "./io/push-socket";
 import type { ScheduleSettings } from "./io/schedule-settings";
 import { type DescentEdge, type PetWindow, toScreenMonitor } from "./io/screen-geometry";
 import { createSettingsBridge, type SettingsBridge, type WindowKind } from "./io/settings-bridge";
@@ -73,6 +78,7 @@ import { createSummonHotkey, type SummonHotkey } from "./io/summon-hotkey";
 import { isTauri } from "./io/tauri-env";
 import { createTravelFrame, type FrameWindow, type Travel } from "./io/travel-frame";
 import { deleteVoice, upsertVoice } from "./io/tts-voices";
+import type { RenderRecord } from "./io/turn-record-log";
 import { appendRecord } from "./io/turn-record-log";
 import { removeOrphanImport } from "./io/user-asset-import";
 import { removeUserVoice as removeUserVoiceFile } from "./io/voice-import";
@@ -1457,6 +1463,8 @@ export async function wireBroker(deps: {
     get(): ExpressMotionSettings;
     subscribe(cb: () => void): () => void;
   };
+  /** Called whenever the renderable vocabulary may have moved, for consumers other than the broker. */
+  onVocabularyChange?: () => void;
   log: Logger;
 }): Promise<{
   onConfigChange: (cfg: AppConfig, changed: ReadonlySet<ConfigSection>) => void;
@@ -1465,6 +1473,8 @@ export async function wireBroker(deps: {
   dispose: () => void;
 }> {
   const { getConfig, getEndpoints, endpointsSettings, expressMotionSettings, log } = deps;
+  // Announced from every site the vocabulary moves at, whether or not a broker is configured.
+  const announce = (): void => deps.onVocabularyChange?.();
   // In the Tauri webview the broker (localhost:3201) is cross-origin → inject the CORS-bypass fetch.
   // Resolved once and reused when the client is retargeted.
   const brokerFetch = (await selectFetch()) ?? undefined;
@@ -1481,6 +1491,7 @@ export async function wireBroker(deps: {
       log.warn("emotion_text_load_failed", { fallback: "free", error: String(err) });
       table = null;
     }
+    announce();
     return table;
   };
   /** Every payload goes through here, so the motion selection reaches publish and tools alike. */
@@ -1521,18 +1532,18 @@ export async function wireBroker(deps: {
   // The selection is broadcast-synced, so this fires for the settings window's edit too.
   const unsubscribeExpressMotions = expressMotionSettings.subscribe(() => {
     if (broker) void broker.publish(vocabulary());
+    announce();
   });
 
   const onConfigChange = (cfg: AppConfig, changed: ReadonlySet<ConfigSection>): void => {
-    if (
-      broker &&
-      (changed.has("emotionRegistry") || changed.has("motions") || changed.has("endpoints"))
-    ) {
-      const eff = getEndpoints();
-      void loadBrokerTable().then((loaded) => {
-        void broker?.publish(derive(cfg, eff, loaded));
-      });
+    if (!(changed.has("emotionRegistry") || changed.has("motions") || changed.has("endpoints"))) {
+      return;
     }
+    const eff = getEndpoints();
+    // The table reload announces the change; the broker only hears about it when it is configured.
+    void loadBrokerTable().then((loaded) => {
+      if (broker) void broker.publish(derive(cfg, eff, loaded));
+    });
   };
 
   const dispose = (): void => {
@@ -1619,6 +1630,8 @@ export function wireCrossWindowSync(deps: {
 }): {
   broadcastSettings: () => void;
   onRemoteChange: (cb: () => void) => void;
+  /** The window's bus, for the channels this helper does not own itself. */
+  bridge: SettingsBridge;
   dispose: () => void;
 } {
   const { renderer, voiceInputStatus, stores, log } = deps;
@@ -1640,6 +1653,7 @@ export function wireCrossWindowSync(deps: {
   return {
     broadcastSettings: core.broadcastSettings,
     onRemoteChange: core.onRemoteChange,
+    bridge: core.bridge,
     dispose: core.dispose,
   };
 }
@@ -1807,4 +1821,83 @@ export async function wireDevGlobals(deps: {
       idleReturn: () => ambient.trigger("idle_returned"),
     },
   });
+}
+
+/**
+ * Routes an open push socket into the client: a `render` frame plays as a turn and a `delegations`
+ * frame replaces the tracked list. The socket itself is created and connected by the host, which
+ * owns its lifetime.
+ */
+export function wirePushTransport(deps: {
+  socket: {
+    onRender(cb: (frame: RenderFrame) => void): () => void;
+    onDelegations(cb: (items: DelegationItem[]) => void): () => void;
+  };
+  turnOutput: TurnOutput;
+  /** Render sink for a cue on a segment that speaks nothing. */
+  renderer: Pick<Renderer, "applyDirective">;
+  delegations: DelegationsStore;
+  appendTurnRecord: (record: RenderRecord) => void;
+  /** Conversation transcript — the reply half of a push turn lands here. */
+  appendTranscript: (entry: ChatHistoryEntry) => void;
+}): () => void {
+  const renderTurn = createRenderTurn({
+    turnOutput: deps.turnOutput,
+    renderer: deps.renderer,
+    appendTurnRecord: deps.appendTurnRecord,
+    appendTranscript: deps.appendTranscript,
+  });
+  const unsubscribes = [
+    deps.socket.onRender((frame) => renderTurn.render(frame)),
+    deps.socket.onDelegations((items) => deps.delegations.replace(items)),
+  ];
+  return () => {
+    for (const off of unsubscribes) off();
+  };
+}
+
+/**
+ * Keeps the push socket on whatever the chat settings now say. It opens once the protocol is push
+ * and an endpoint is set, closes when the protocol changes, and reopens on an endpoint or key edit
+ * so the next attempt reads the new value — every other endpoint setting applies live too.
+ */
+export function wirePushMode(deps: {
+  socket: Pick<PushSocket, "connect" | "disconnect">;
+  /** Effective endpoints, read at call time. */
+  getEndpoints: () => Pick<EndpointsConfig, "chat_api" | "chat_base_url">;
+  endpointsSettings: { subscribe(cb: () => void): () => void };
+  chatKeySettings: { subscribe(cb: () => void): () => void };
+}): () => void {
+  // The endpoint the socket is currently on, or null while it is meant to be down.
+  let openOn: string | null = null;
+
+  /** Where the socket belongs now, or null when push mode is off or unconfigured. */
+  function target(): string | null {
+    const endpoints = deps.getEndpoints();
+    if (endpoints.chat_api !== "push") return null;
+    return deps.getEndpoints().chat_base_url.trim() || null;
+  }
+
+  function apply(reopen: boolean): void {
+    const next = target();
+    if (next === null) {
+      if (openOn !== null) deps.socket.disconnect();
+      openOn = null;
+      return;
+    }
+    if (openOn === next && !reopen) return;
+    if (openOn !== null) deps.socket.disconnect();
+    deps.socket.connect();
+    openOn = next;
+  }
+
+  apply(false);
+  const unsubscribes = [
+    deps.endpointsSettings.subscribe(() => apply(false)),
+    // The key is not part of the target, so an edit to it asks for the reopen explicitly.
+    deps.chatKeySettings.subscribe(() => apply(true)),
+  ];
+  return () => {
+    for (const off of unsubscribes) off();
+  };
 }
