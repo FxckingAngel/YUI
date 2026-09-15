@@ -9,6 +9,18 @@
 
 import "./styles.css";
 import "./ui/message-window.css";
+import { loadConfig } from "./config/load";
+import type { EndpointsConfig } from "./contract";
+import {
+  createDelegationChipSettings,
+  localStorageDelegationChipStorage,
+} from "./io/delegation-chip-settings";
+import { createMirroredDelegations } from "./io/delegations-bridge";
+import {
+  createEndpointsSettings,
+  localStorageEndpointsStorage,
+  mergeEndpoints,
+} from "./io/endpoints-settings";
 import { attachKeepOnScreen } from "./io/keep-on-screen";
 import { createMessageBridge } from "./io/message-bridge";
 import { MESSAGE_WINDOW_WIDTH } from "./io/message-window";
@@ -17,10 +29,12 @@ import {
   localStorageMessageWindowStorage,
 } from "./io/message-window-settings";
 import { createFlagSettings, localStorageStore } from "./io/persisted-store";
+import { createMirroredPushSocket } from "./io/push-socket-bridge";
 import { toScreenMonitor } from "./io/screen-geometry";
 import { createSettingsBridge } from "./io/settings-bridge";
 import { isTauri } from "./io/tauri-env";
 import { createLogger, initLogger } from "./logger";
+import { createDelegationChip } from "./ui/delegation-chip";
 import { reloadFromStorage as reloadLocale } from "./ui/i18n";
 import { createMessagePlate } from "./ui/message-plate";
 import { attachSummonKey } from "./ui/summon-key";
@@ -41,6 +55,9 @@ async function bootstrap(): Promise<void> {
   const bubblePersistSettings = createFlagSettings(false, {
     storage: localStorageStore("yui.bubble-persist"),
   });
+  const endpointsSettings = createEndpointsSettings({
+    storage: localStorageEndpointsStorage(),
+  });
 
   const bridge = createMessageBridge(undefined, { windowKind: "message" });
   const settingsBridge = createSettingsBridge(undefined, { windowKind: "message" });
@@ -54,11 +71,63 @@ async function bootstrap(): Promise<void> {
   surfaces.onSubmit((text, images) => bridge.emitControl({ op: "submit", text, images }));
   surfaces.onStop(() => bridge.emitControl({ op: "stop" }));
 
+  // The plate and the chip share the column's first row; the chip sits to the plate's right.
+  const plateRow = document.createElement("div");
+  plateRow.className = "yui-plate-row";
+  surfaces.el.prepend(plateRow);
   const plate = createMessagePlate({
-    mount: surfaces.el,
+    mount: plateRow,
     onDock: () => bridge.emitControl({ op: "dock" }),
     startDragging: () => void startDragging(),
   });
+
+  // The socket lives in the pet window; this one mirrors its state and its delegations list.
+  const pushSocket = createMirroredPushSocket({ bridge: settingsBridge });
+  const delegations = createMirroredDelegations({ bridge: settingsBridge });
+  const chipCollapsed = createDelegationChipSettings({
+    storage: localStorageDelegationChipStorage(),
+  });
+  const chip = createDelegationChip({
+    mount: plateRow,
+    store: delegations,
+    collapsed: chipCollapsed,
+    pushState: pushSocket,
+    // The character window owns the settings panel, and opens it on the tab the chat section is on.
+    onOpenSettings: () => bridge.emitControl({ op: "open-settings" }),
+    suppressed: true,
+  });
+
+  // Only push mode has a transport to report on, and the pet window publishes its socket in every
+  // mode, so elsewhere that socket sits disconnected and the chip would draw a permanent loss.
+  // A state the pet window has not sent yet is not a loss either, so the chip starts away.
+  let bundledEndpoints: EndpointsConfig | null = null;
+  let sawPushState = false;
+
+  function effectiveChatApi(): string | undefined {
+    const overrides = endpointsSettings.get();
+    return bundledEndpoints === null
+      ? overrides.chat_api
+      : mergeEndpoints(bundledEndpoints, overrides).chat_api;
+  }
+
+  function applyChipMode(): void {
+    chip.setSuppressed(!sawPushState || effectiveChatApi() !== "push");
+  }
+
+  applyChipMode();
+  const unsubscribeChipState = pushSocket.onState(() => {
+    sawPushState = true;
+    applyChipMode();
+  });
+  const unsubscribeEndpoints = endpointsSettings.subscribe(applyChipMode);
+  // The bundled default decides the protocol only where no override names one, so the chip waits
+  // for it rather than blocking the window's own surfaces on a fetch.
+  void loadConfig()
+    .then((cfg) => {
+      bundledEndpoints = cfg.endpoints;
+      applyChipMode();
+    })
+    .catch((error) => log.warn("config_load_failed", { error: String(error) }));
 
   bridge.onSurface((op) => {
     switch (op.op) {
@@ -122,6 +191,10 @@ async function bootstrap(): Promise<void> {
   const reloadShared = (): void => {
     reloadLocale();
     bubblePersistSettings.reloadFromStorage();
+    endpointsSettings.reloadFromStorage();
+    applyChipMode();
+    pushSocket.refresh();
+    delegations.refresh();
   };
   const unlistenSettings = settingsBridge.onSettingsChanged(reloadShared);
   window.addEventListener("focus", reloadShared);
@@ -137,7 +210,15 @@ async function bootstrap(): Promise<void> {
     detachSummonKey();
     window.removeEventListener("focus", reloadShared);
     unlistenSettings();
+    unsubscribeChipState();
+    unsubscribeEndpoints();
+    chip.dispose();
+    chipCollapsed.dispose();
+    endpointsSettings.dispose();
+    pushSocket.dispose();
+    delegations.dispose();
     plate.dispose();
+    plateRow.remove();
     surfaces.dispose();
     bridge.dispose();
     settingsBridge.dispose();

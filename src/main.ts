@@ -451,6 +451,8 @@ async function bootstrap(): Promise<BootstrapHandle> {
   // let bindings; onActivate arrows read the live binding, so recreating is safe.
   let quickControls = buildQuickControls();
   register(() => quickControls.dispose());
+  // A popped-out surface has no settings panel of its own; it asks this window for one.
+  remoteSurfaces.onOpenSettings(() => quickControls.open(undefined, { tab: "adv" }));
   const buildCaptureIndicator = (): ReturnType<typeof createCaptureIndicator> =>
     createCaptureIndicator({
       mount: root,
@@ -565,6 +567,7 @@ async function bootstrap(): Promise<BootstrapHandle> {
     // Only push mode carries a delegations list; the chip draws whatever the socket feeds the store.
     let chip: ReturnType<typeof createDelegationChip> | null = null;
     let chipCollapsed: ReturnType<typeof createDelegationChipSettings> | null = null;
+    let offChipMode: (() => void) | null = null;
     register(
       wirePushMode({
         socket: pushSocket,
@@ -577,9 +580,17 @@ async function bootstrap(): Promise<BootstrapHandle> {
               mount: root,
               store: delegations,
               collapsed: chipCollapsed,
+              pushState: pushSocket,
+              onOpenSettings: () => quickControls.open(undefined, { tab: "adv" }),
+              suppressed: messageMode() === "popped",
             });
+            offChipMode = messageWindowSettings.subscribe(() =>
+              chip?.setSuppressed(messageMode() === "popped"),
+            );
           },
           dispose: () => {
+            offChipMode?.();
+            offChipMode = null;
             chip?.dispose();
             chipCollapsed?.dispose();
             chip = null;

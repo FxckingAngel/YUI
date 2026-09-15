@@ -338,7 +338,9 @@ const ko: Record<string, string> = {
   "svc.chat_status_connected": "연결됨 · {id}",
   "svc.chat_status_connecting": "연결하는 중…",
   "svc.chat_status_reconnecting": "{seconds}초 뒤 다시 연결",
-  "svc.chat_status_failed": "거부됨 · 종료 코드 {code}",
+  "svc.chat_status_refused": "백엔드가 키를 거부했습니다",
+  "svc.chat_status_reconnect": "다시 연결",
+  "svc.chat_status_connect_now": "지금 연결",
   "svc.chat_status_offline": "연결 안 됨",
   "svc.chat_preset_label": "제공자",
   "svc.chat_preset_aria": "채팅 제공자 프리셋",
@@ -482,6 +484,7 @@ const ko: Record<string, string> = {
 
   // delegations
   "deleg.chip_running": "작업 {n}개 진행 중",
+  "deleg.chip_lost": "연결 끊김",
   "deleg.list_title": "위임한 작업",
   "deleg.min": "{n}분",
   "deleg.hour_min": "{h}시간 {m}분",

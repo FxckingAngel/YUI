@@ -339,7 +339,9 @@ const en: Record<string, string> = {
   "svc.chat_status_connected": "Connected · {id}",
   "svc.chat_status_connecting": "Connecting…",
   "svc.chat_status_reconnecting": "Reconnecting in {seconds}s",
-  "svc.chat_status_failed": "Refused · close code {code}",
+  "svc.chat_status_refused": "The backend refused the key",
+  "svc.chat_status_reconnect": "Reconnect",
+  "svc.chat_status_connect_now": "Connect now",
   "svc.chat_status_offline": "Not connected",
   "svc.chat_preset_label": "Provider",
   "svc.chat_preset_aria": "Chat provider preset",
@@ -485,6 +487,7 @@ const en: Record<string, string> = {
 
   // delegations
   "deleg.chip_running": "{n} tasks in progress",
+  "deleg.chip_lost": "Connection lost",
   "deleg.list_title": "Delegated tasks",
   "deleg.min": "{n}m",
   "deleg.hour_min": "{h}h {m}m",

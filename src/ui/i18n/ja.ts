@@ -340,7 +340,9 @@ const ja: Record<string, string> = {
   "svc.chat_status_connected": "接続済み · {id}",
   "svc.chat_status_connecting": "接続中…",
   "svc.chat_status_reconnecting": "{seconds}秒後に再接続",
-  "svc.chat_status_failed": "拒否 · クローズコード {code}",
+  "svc.chat_status_refused": "バックエンドがキーを拒否しました",
+  "svc.chat_status_reconnect": "再接続",
+  "svc.chat_status_connect_now": "今すぐ接続",
   "svc.chat_status_offline": "未接続",
   "svc.chat_preset_label": "プロバイダー",
   "svc.chat_preset_aria": "チャットプロバイダーのプリセット",
@@ -484,6 +486,7 @@ const ja: Record<string, string> = {
 
   // delegations
   "deleg.chip_running": "作業{n}件を実行中",
+  "deleg.chip_lost": "接続が切れました",
   "deleg.list_title": "委任した作業",
   "deleg.min": "{n}分",
   "deleg.hour_min": "{h}時間{m}分",

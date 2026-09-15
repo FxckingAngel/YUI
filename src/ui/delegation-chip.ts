@@ -1,14 +1,16 @@
 /**
- * Delegation chip — the backend's background work as a pill beside the avatar.
+ * Delegation chip — the push transport's one status surface beside the avatar.
  *
  * Pure renderer — firing ≠ judgment: this only *draws* the delegations list the push socket
- * feeds. Tap toggles the list popover, a held press folds the chip to its dot, and the fold
- * is a per-device choice.
+ * feeds and the state that socket reports. While the socket is ready it carries the running
+ * count and its tap toggles the list popover; while it is anything else it carries one
+ * lost-connection wording and its tap opens the settings window, where the cause is named.
+ * A held press folds the chip to its dot, and the fold is a per-device choice.
  */
 
 import "./delegation-chip.css";
 import type { DelegationChipSettingsStore } from "../io/delegation-chip-settings";
-import type { DelegationsStore } from "../io/delegations-store";
+import type { DelegationItem, PushSocketState } from "../io/push-socket";
 import { DELEGATION_REFRESH_MS, renderDelegationRows } from "./delegation-rows";
 import { afterFadeOut } from "./fade-out";
 import { subscribe as subscribeLocale, t } from "./i18n";
@@ -16,16 +18,37 @@ import { subscribe as subscribeLocale, t } from "./i18n";
 /** How long a press must hold before it folds the chip. */
 const FOLD_PRESS_MS = 500;
 
+/** Where the push socket stands, as the chip reads it — the real socket or a window's mirror. */
+export interface PushStatePort {
+  getState(): PushSocketState;
+  onState(cb: (state: PushSocketState) => void): () => void;
+}
+
+/** The delegations list as the chip reads it — the pet window's store or a window's mirror. */
+export interface DelegationsPort {
+  get(): DelegationItem[];
+  runningCount(): number;
+  subscribe(cb: (items: DelegationItem[]) => void): () => void;
+}
+
 interface DelegationChipOptions {
   mount: HTMLElement;
-  store: DelegationsStore;
+  store: DelegationsPort;
   /** Per-device fold choice. */
   collapsed: DelegationChipSettingsStore;
+  /** The transport the chip reports on. Anything but ready reads as a lost connection. */
+  pushState: PushStatePort;
+  /** Opens the settings window at the chat section — what a tap does while the connection is lost. */
+  onOpenSettings(): void;
+  /** Starts hidden, for a window that has nothing to report yet. */
+  suppressed?: boolean;
   now?: () => number;
 }
 
 export interface DelegationChip {
   el: HTMLElement;
+  /** Hides the chip entirely — the popped-out surfaces carry it instead. */
+  setSuppressed(suppressed: boolean): void;
   dispose(): void;
 }
 
@@ -33,6 +56,9 @@ export function createDelegationChip({
   mount,
   store,
   collapsed,
+  pushState,
+  onOpenSettings,
+  suppressed: initialSuppressed = false,
   now = Date.now,
 }: DelegationChipOptions): DelegationChip {
   const el = document.createElement("div");
@@ -60,6 +86,7 @@ export function createDelegationChip({
 
   let visible = false;
   let listOpen = false;
+  let suppressed = initialSuppressed;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let cancelListFade: (() => void) | null = null;
   let cancelHideFade: (() => void) | null = null;
@@ -111,7 +138,33 @@ export function createDelegationChip({
     });
   }
 
+  function show(): void {
+    if (visible) return;
+    visible = true;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("is-visible"));
+  }
+
   function refresh(): void {
+    // Every state but ready reads the same here; the cause is named in the settings window.
+    const lost = pushState.getState().kind !== "ready";
+    el.classList.toggle("is-lost", lost);
+    if (suppressed) {
+      hide();
+      return;
+    }
+    if (lost) {
+      clearRefreshTimer();
+      closeList();
+      chipBtn.removeAttribute("aria-expanded");
+      labelEl.textContent = t("deleg.chip_lost");
+      countEl.textContent = "";
+      show();
+      return;
+    }
+    if (!chipBtn.hasAttribute("aria-expanded")) {
+      chipBtn.setAttribute("aria-expanded", String(listOpen));
+    }
     const items = store.get();
     const running = store.runningCount();
     if (running === 0) {
@@ -121,12 +174,9 @@ export function createDelegationChip({
     labelEl.textContent = t("deleg.chip_running", { n: running });
     countEl.textContent = String(running);
     if (listOpen) renderDelegationRows(rowsEl, items, now());
-    if (visible) return;
-    visible = true;
-    el.hidden = false;
-    requestAnimationFrame(() => el.classList.add("is-visible"));
-    clearRefreshTimer();
-    refreshTimer = setInterval(refresh, DELEGATION_REFRESH_MS);
+    show();
+    // A chip already visible from the lost state still needs the timer the lost branch cleared.
+    if (refreshTimer === null) refreshTimer = setInterval(refresh, DELEGATION_REFRESH_MS);
   }
 
   function applyCollapsed(isFolded: boolean): void {
@@ -169,6 +219,10 @@ export function createDelegationChip({
       collapsed.setCollapsed(false);
       return;
     }
+    if (pushState.getState().kind !== "ready") {
+      onOpenSettings();
+      return;
+    }
     if (listOpen) closeList();
     else openList();
   }
@@ -187,6 +241,7 @@ export function createDelegationChip({
   });
 
   const unsubscribeStore = store.subscribe(() => refresh());
+  const unsubscribePushState = pushState.onState(() => refresh());
   const unsubscribeCollapsed = collapsed.subscribe((s) => applyCollapsed(s.collapsed));
   applyCollapsed(collapsed.get().collapsed);
   refresh();
@@ -198,6 +253,7 @@ export function createDelegationChip({
     cancelListFade?.();
     cancelHideFade?.();
     unsubscribeStore();
+    unsubscribePushState();
     unsubscribeCollapsed();
     unsubscribeLocale();
     chipBtn.removeEventListener("pointerdown", onPointerDown);
@@ -208,5 +264,13 @@ export function createDelegationChip({
     el.remove();
   }
 
-  return { el, dispose };
+  return {
+    el,
+    setSuppressed(next): void {
+      if (suppressed === next) return;
+      suppressed = next;
+      refresh();
+    },
+    dispose,
+  };
 }
