@@ -13,7 +13,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExpressArgs } from "../contract";
 import { createSpeechPlayback } from "./speech-playback";
-import { TTS_SKIP, type TtsPipeline, type TtsPipelineOptions } from "./tts-pipeline";
+import {
+  type SpokenSplit,
+  TTS_SKIP,
+  type TtsPipeline,
+  type TtsPipelineOptions,
+} from "./tts-pipeline";
 
 /** These tests replace pipeline construction with a factory stub, so this synth is never called. */
 const NO_PIPELINE = {
@@ -25,8 +30,11 @@ function stubPipelineFactory() {
   const calls = { pushTextDelta: [] as string[], ended: 0, disposed: 0 };
   let captured: TtsPipelineOptions | null = null;
   let outstanding = false;
+  let split: SpokenSplit = { spoken: "", unspoken: "" };
+  let disposed = false;
   const factory = (opts: TtsPipelineOptions): TtsPipeline => {
     captured = opts;
+    disposed = false;
     return {
       pushTextDelta: (t: string) => calls.pushTextDelta.push(t),
       setCue: () => {},
@@ -34,8 +42,11 @@ function stubPipelineFactory() {
         calls.ended++;
       },
       hasOutstandingWork: () => outstanding,
+      // Mirrors the real pipeline: a disposed one has nothing left to report.
+      spokenSplit: () => (disposed ? { spoken: "", unspoken: "" } : split),
       dispose: () => {
         calls.disposed++;
+        disposed = true;
         outstanding = false;
       },
     };
@@ -45,6 +56,9 @@ function stubPipelineFactory() {
     calls,
     setOutstandingWork: (v: boolean) => {
       outstanding = v;
+    },
+    setSpokenSplit: (v: SpokenSplit) => {
+      split = v;
     },
     emitAmplitude: (v: number) => captured?.onAmplitude?.(v),
     emitPlaybackEnd: () => captured?.onPlaybackEnd?.(),
@@ -62,6 +76,7 @@ function multiPipelineFactory() {
     setCue: ReturnType<typeof vi.fn>;
     end: ReturnType<typeof vi.fn>;
     hasOutstandingWork: ReturnType<typeof vi.fn>;
+    spokenSplit: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     onAmplitude?: (rms: number) => void;
     onPlaybackEnd?: () => void;
@@ -72,6 +87,7 @@ function multiPipelineFactory() {
       setCue: vi.fn(),
       end: vi.fn(),
       hasOutstandingWork: vi.fn(() => false),
+      spokenSplit: vi.fn(() => ({ spoken: "", unspoken: "" })),
       dispose: vi.fn(),
       onAmplitude: opts.onAmplitude,
       onPlaybackEnd: opts.onPlaybackEnd,
@@ -881,7 +897,7 @@ describe("createSpeechPlayback — muted interrupted turn", () => {
     sp.interrupt();
     sp.onSpeechDelta("next");
 
-    expect(multi.instances[2].pushTextDelta).toHaveBeenCalledWith("next");
+    expect(multi.instances[2].pushTextDelta).toHaveBeenCalledWith("next", true);
   });
 
   it("clears mute when the interrupted turn completes", () => {
@@ -899,7 +915,7 @@ describe("createSpeechPlayback — muted interrupted turn", () => {
     sp.onSpeechEnd();
     sp.onSpeech("filler");
 
-    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("filler");
+    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("filler", true);
   });
 
   it("drops cues while muted without leaking one into a later filler", () => {
@@ -921,7 +937,7 @@ describe("createSpeechPlayback — muted interrupted turn", () => {
     sp.onSpeech("filler");
 
     expect(multi.instances[1].setCue).not.toHaveBeenCalled();
-    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("filler");
+    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("filler", true);
   });
 
   it("keeps delta routing unchanged after a plain interrupt", () => {
@@ -937,7 +953,7 @@ describe("createSpeechPlayback — muted interrupted turn", () => {
     sp.interrupt();
     sp.onSpeechDelta("next");
 
-    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("next");
+    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("next", true);
   });
 
   it("clears mute when the interrupted turn completes without a delta", () => {
@@ -954,7 +970,7 @@ describe("createSpeechPlayback — muted interrupted turn", () => {
     sp.onSpeechEnd();
     sp.onSpeech("filler");
 
-    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("filler");
+    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("filler", true);
   });
 });
 
@@ -1527,7 +1543,7 @@ describe("createSpeechPlayback — backend utterance tracking", () => {
     sp.onSpeechDelta("hello");
     sp.interrupt();
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
-    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted");
+    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted", { spoken: "", unspoken: "" });
 
     sp.interrupt();
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
@@ -1539,7 +1555,7 @@ describe("createSpeechPlayback — backend utterance tracking", () => {
     sp.onSpeechDelta("hello");
     sp.abort();
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
-    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted");
+    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted", { spoken: "", unspoken: "" });
   });
 
   it("interrupt before a queued boundary fires ends the utterance interrupted", () => {
@@ -1550,7 +1566,7 @@ describe("createSpeechPlayback — backend utterance tracking", () => {
     sp.interrupt();
 
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
-    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted");
+    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted", { spoken: "", unspoken: "" });
   });
 
   it("a barge-in interrupt ends the utterance and leaves the muted remainder untracked", () => {
@@ -1559,7 +1575,7 @@ describe("createSpeechPlayback — backend utterance tracking", () => {
     sp.onSpeechDelta("hello");
     sp.interrupt({ muteCurrentTurn: true });
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
-    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted");
+    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted", { spoken: "", unspoken: "" });
 
     sp.onSpeechDelta("still arriving");
     expect(onUtteranceStart).toHaveBeenCalledTimes(1);
@@ -1608,7 +1624,7 @@ describe("createSpeechPlayback — backend utterance tracking", () => {
     sp.abort();
 
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
-    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted");
+    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted", { spoken: "", unspoken: "" });
   });
 
   it("a pipeline that fires its boundary inside end() still ends the utterance complete", () => {
@@ -1623,6 +1639,7 @@ describe("createSpeechPlayback — backend utterance tracking", () => {
         setCue: () => {},
         end: () => opts.onPlaybackEnd?.(),
         hasOutstandingWork: () => false,
+        spokenSplit: () => ({ spoken: "", unspoken: "" }),
         dispose: () => {},
       }),
       isStrolling: () => false,
@@ -1673,5 +1690,84 @@ describe("createSpeechPlayback — backend utterance tracking", () => {
 
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
     expect(onUtteranceEnd).toHaveBeenCalledWith("complete");
+  });
+});
+
+describe("createSpeechPlayback — what the user heard of a cut-off reply", () => {
+  function trackedPlayback() {
+    const stub = stubPipelineFactory();
+    const onUtteranceEnd =
+      vi.fn<(ended: "complete" | "interrupted", split?: SpokenSplit) => void>();
+    const sp = createSpeechPlayback({
+      renderer: spyRenderer(),
+      surfaces: spySurfaces(),
+      pipeline: NO_PIPELINE,
+      createPipeline: stub.factory,
+      isStrolling: () => false,
+      onUtteranceEnd,
+    });
+    return { sp, stub, onUtteranceEnd };
+  }
+
+  it("interrupt reports the split as it stood before the pipeline was disposed", () => {
+    const { sp, stub, onUtteranceEnd } = trackedPlayback();
+    stub.setSpokenSplit({ spoken: "heard this.", unspoken: "never heard this." });
+
+    sp.onSpeechDelta("heard this. never heard this.");
+    sp.interrupt();
+
+    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted", {
+      spoken: "heard this.",
+      unspoken: "never heard this.",
+    });
+  });
+
+  it("abort reports the split as it stood before the pipeline was disposed", () => {
+    const { sp, stub, onUtteranceEnd } = trackedPlayback();
+    stub.setSpokenSplit({ spoken: "heard this.", unspoken: "never heard this." });
+
+    sp.onSpeechDelta("heard this. never heard this.");
+    sp.abort();
+
+    expect(onUtteranceEnd).toHaveBeenCalledWith("interrupted", {
+      spoken: "heard this.",
+      unspoken: "never heard this.",
+    });
+  });
+
+  it("a completed utterance reports no split", () => {
+    const { sp, stub, onUtteranceEnd } = trackedPlayback();
+    stub.setSpokenSplit({ spoken: "all of it.", unspoken: "" });
+
+    sp.onSpeechDelta("all of it.");
+    sp.onSpeechEnd();
+    stub.emitPlaybackEnd();
+
+    expect(onUtteranceEnd).toHaveBeenCalledWith("complete");
+  });
+
+  it("releaseMute lets the reply after a barge-in reach the pipeline again", () => {
+    const multi = multiPipelineFactory();
+    const sp = createSpeechPlayback({
+      renderer: spyRenderer(),
+      surfaces: spySurfaces(),
+      pipeline: NO_PIPELINE,
+      createPipeline: multi.factory,
+      isStrolling: () => false,
+    });
+
+    sp.interrupt({ muteCurrentTurn: true });
+    sp.releaseMute();
+    sp.onSpeechDelta("the answer");
+
+    expect(multi.instances[1].pushTextDelta).toHaveBeenCalledWith("the answer", true);
+  });
+
+  it("hasOutstandingSpeech follows the pipeline's own answer", () => {
+    const { sp, stub } = trackedPlayback();
+
+    expect(sp.hasOutstandingSpeech()).toBe(false);
+    stub.setOutstandingWork(true);
+    expect(sp.hasOutstandingSpeech()).toBe(true);
   });
 });

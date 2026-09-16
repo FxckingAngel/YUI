@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { wirePushMode, wirePushTransport } from "./bootstrap-wiring";
 import type { ControlEnvelope } from "./contract";
+import { createPushTurns } from "./dispatcher/push-turn";
 import { makeTurnOutput } from "./dispatcher/test-helpers";
 import type { ChatHistoryEntry } from "./io/chat-history-store";
 import { createDelegationsStore } from "./io/delegations-store";
@@ -90,6 +91,7 @@ function fakeLog() {
 
 let socket: ReturnType<typeof fakeSocket>;
 let turnOutput: ReturnType<typeof makeTurnOutput>;
+let pushTurns: ReturnType<typeof createPushTurns>;
 let delegations: ReturnType<typeof createDelegationsStore>;
 let reasoning: ReturnType<typeof createReasoningStore>;
 let records: unknown[];
@@ -101,6 +103,7 @@ function wire() {
   return wirePushTransport({
     socket,
     turnOutput,
+    pushTurns,
     renderer: { applyDirective: (env) => directives.push(env) },
     delegations,
     reasoning,
@@ -113,6 +116,7 @@ function wire() {
 beforeEach(() => {
   socket = fakeSocket();
   turnOutput = makeTurnOutput();
+  pushTurns = createPushTurns();
   delegations = createDelegationsStore();
   reasoning = createReasoningStore();
   records = [];
@@ -182,6 +186,28 @@ describe("wirePushTransport", () => {
     wire();
     socket.pushReasoning("A");
     socket.pushRender({ ...RENDER, reasoning: "AB" });
+
+    expect(reasoning.get()).toEqual({ text: "AB", live: false });
+  });
+
+  it("abandons the reasoning still streaming for a turn the user stopped", () => {
+    wire();
+    pushTurns.opened("7");
+    socket.pushReasoning("A");
+    pushTurns.cut();
+    socket.pushRender({ ...RENDER, reasoning: "AB" });
+
+    expect(reasoning.get()).toEqual({ text: "", live: false });
+  });
+
+  it("keeps a reasoning text an earlier render finished when a later frame is dropped", () => {
+    wire();
+    pushTurns.opened("7");
+    socket.pushReasoning("A");
+    socket.pushRender({ ...RENDER, reasoning: "AB" });
+    pushTurns.opened("8");
+    pushTurns.cut();
+    socket.pushRender({ ...RENDER, turn_id: "8", reasoning: "CD" });
 
     expect(reasoning.get()).toEqual({ text: "AB", live: false });
   });

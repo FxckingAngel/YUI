@@ -29,6 +29,7 @@ import type { Guardrails, GuardrailsConfig } from "./dispatcher/guardrails";
 import { createMilestoneSource, type MilestoneSource } from "./dispatcher/milestone-source";
 import type { ProactivePacer } from "./dispatcher/proactive-pacer";
 import { createProactiveSource, type ProactiveSource } from "./dispatcher/proactive-source";
+import type { PushTurns } from "./dispatcher/push-turn";
 import { createRenderTurn } from "./dispatcher/render-turn";
 import { createScheduleSource, type ScheduleSource } from "./dispatcher/schedule-source";
 import { createScreenSource, type ScreenSource } from "./dispatcher/screen-source";
@@ -326,18 +327,23 @@ export function createSettingsBroadcast(deps: {
 }
 
 /**
- * Stop click → client-side cancel of the in-flight turn AND immediate speech abort.
- * cancel() alone leaves already-queued TTS segments playing: backend-caller's superseded
- * path defers speech cleanup to the next turn, which never comes on an explicit stop.
+ * Stop click → client-side cancel of the in-flight turn, the push turns still outstanding cut, and
+ * the queued speech stopped. cancel() alone leaves already-queued TTS segments playing: backend-
+ * caller's superseded path defers speech cleanup to the next turn, which never comes on an explicit
+ * stop.
  */
 export function wireStopControl(deps: {
   onStop: (cb: () => void) => void;
   cancel: () => void;
-  abortSpeech: () => void;
+  /** Stops the queued speech and leaves the pipeline able to speak the next reply. */
+  stopSpeech: () => void;
+  /** Drops the renders still to come for every turn outstanding. */
+  cutPushTurns: () => void;
 }): void {
   deps.onStop(() => {
     deps.cancel();
-    deps.abortSpeech();
+    deps.cutPushTurns();
+    deps.stopSpeech();
   });
 }
 
@@ -1838,6 +1844,8 @@ export function wirePushTransport(deps: {
     onState(cb: (state: PushSocketState) => void): () => void;
   };
   turnOutput: TurnOutput;
+  /** Which push turns the user stopped — a frame of one of them never plays. */
+  pushTurns: PushTurns;
   /** Render sink for a cue on a segment that speaks nothing. */
   renderer: Pick<Renderer, "applyDirective">;
   delegations: DelegationsStore;
@@ -1849,14 +1857,17 @@ export function wirePushTransport(deps: {
 }): () => void {
   const renderTurn = createRenderTurn({
     turnOutput: deps.turnOutput,
+    pushTurns: deps.pushTurns,
     renderer: deps.renderer,
     appendTurnRecord: deps.appendTurnRecord,
     appendTranscript: deps.appendTranscript,
   });
   const unsubscribes = [
     deps.socket.onRender((frame) => {
-      renderTurn.render(frame);
-      deps.reasoning.finish(frame.reasoning);
+      // A dropped frame puts no reply in the message window, so its reasoning has nothing to sit
+      // under: the cycle it was writing is abandoned, an earlier finished text is left alone.
+      if (renderTurn.render(frame)) deps.reasoning.finish(frame.reasoning);
+      else deps.reasoning.interrupt();
     }),
     deps.socket.onDelegations((items) => {
       deps.delegations.replace(items);

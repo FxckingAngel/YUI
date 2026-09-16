@@ -35,6 +35,7 @@ import type { EventBus } from "./dispatcher/event-bus";
 import { createGuardrails, type Guardrails, type GuardrailsConfig } from "./dispatcher/guardrails";
 import { createPreviousTurn } from "./dispatcher/previous-turn";
 import { createProactivePacer } from "./dispatcher/proactive-pacer";
+import { createPushTurns } from "./dispatcher/push-turn";
 import { createTurnLog } from "./dispatcher/turn";
 import type { UserInputSource } from "./dispatcher/user-input-source";
 import { initDrag, type PatGesture } from "./drag";
@@ -274,6 +275,7 @@ const realFactories: ConfiguredBootstrapFactories = {
     const previousTurn = createPreviousTurn({ currentTurn: () => turnLog.current() });
     // Voice creation precedes the walker, so the stroll query stays late-bound across that cycle.
     let strollingRef: { isStrolling(): boolean } | null = null;
+    const pushTurns = createPushTurns();
     const voice = wireVoicePipeline({
       renderer,
       surfaces,
@@ -295,6 +297,7 @@ const realFactories: ConfiguredBootstrapFactories = {
       },
       onUtteranceStart: previousTurn.utteranceStart,
       onUtteranceEnd: previousTurn.utteranceEnd,
+      onBargeIn: () => pushTurns.cut(),
     });
     register(voice.dispose);
 
@@ -343,6 +346,8 @@ const realFactories: ConfiguredBootstrapFactories = {
       // Built per turn from the published vocabulary, so a live edit reaches the next tool schema.
       clientTools: () => createClientToolRegistry([createGenerateExpressTool(broker.vocabulary())]),
       pushTurn: (frame) => pushSocket?.sendTurn(frame) ?? false,
+      onPushTurnCut: () => pushTurns.cut(),
+      onPushTurnSent: (turnId) => pushTurns.opened(turnId),
     });
     const guardrails = createGuardrails(getGuardrails());
     const pacer = createProactivePacer({ getIntervalMs: () => pacerGapSettings.get().value });
@@ -742,6 +747,7 @@ const realFactories: ConfiguredBootstrapFactories = {
         wirePushTransport({
           socket: pushSocket,
           turnOutput: voice.turnOutput,
+          pushTurns,
           renderer,
           delegations,
           reasoning,
@@ -755,7 +761,9 @@ const realFactories: ConfiguredBootstrapFactories = {
     wireStopControl({
       onStop: (callback) => surfaces.onStop(callback),
       cancel: () => dispatcher.cancel(),
-      abortSpeech: () => voice.speechPlayback.abort(),
+      // interrupt() stops the queued audio and leaves the pipeline able to speak the next reply.
+      stopSpeech: () => voice.speechPlayback.interrupt(),
+      cutPushTurns: () => pushTurns.cut(),
     });
     surfaces.onSubmit((text, images) => {
       userInput.submit(text, images);
