@@ -124,9 +124,16 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
-/** A render frame the client can act on: an ordered segment list and a source to log. */
-function isRenderFrame(v: Record<string, unknown>): boolean {
-  return Array.isArray(v.segments) && typeof v.source === "string";
+/**
+ * The field that makes a render frame unreadable, or null when the client can act on it: an
+ * ordered segment list, a source to log, and the turn it answers. A turn_id of another type would
+ * leave the turn that sent it waiting out its whole budget.
+ */
+function renderFrameFault(v: Record<string, unknown>): string | null {
+  if (!Array.isArray(v.segments)) return "segments";
+  if (typeof v.source !== "string") return "source";
+  if (typeof v.turn_id !== "string" && v.turn_id !== null) return "turn_id";
+  return null;
 }
 
 export function createPushSocket(deps: PushSocketDeps): PushSocket {
@@ -215,8 +222,11 @@ export function createPushSocket(deps: PushSocketDeps): PushSocket {
         return;
       }
       case "render": {
-        if (!isRenderFrame(frame)) {
-          log.warn("frame_malformed", { type: "render" });
+        // A serialiser that drops null fields leaves the turn_id off a reply the backend started.
+        if (frame.turn_id === undefined) frame.turn_id = null;
+        const fault = renderFrameFault(frame);
+        if (fault !== null) {
+          log.warn("frame_malformed", { type: "render", field: fault });
           return;
         }
         if (frame.reasoning !== undefined && typeof frame.reasoning !== "string") {

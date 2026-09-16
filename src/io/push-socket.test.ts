@@ -811,6 +811,44 @@ describe("createPushSocket — inbound frames", () => {
     expect(seen).toEqual([]);
   });
 
+  it("ignores a render frame whose turn_id is not a string", async () => {
+    await connected();
+    const seen: unknown[] = [];
+    socket.onRender((frame) => seen.push(frame));
+    FakeSocket.last().push({ ...RENDER, turn_id: 7 });
+
+    expect(seen).toEqual([]);
+  });
+
+  it("reads a render frame that carries no turn_id as one the backend started on its own", async () => {
+    await connected();
+    const seen: unknown[] = [];
+    socket.onRender((frame) => seen.push(frame));
+    FakeSocket.last().push({ type: "render", source: "hermes", segments: [] });
+
+    expect(seen).toEqual([{ type: "render", turn_id: null, source: "hermes", segments: [] }]);
+  });
+
+  it("names the field that made a render frame unreadable", async () => {
+    await connected();
+    FakeSocket.last().push({ ...RENDER, turn_id: 7 });
+
+    expect(logger.warn).toHaveBeenCalledWith("frame_malformed", {
+      type: "render",
+      field: "turn_id",
+    });
+  });
+
+  it("hands a render frame the backend started on its own to every subscriber", async () => {
+    await connected();
+    const seen: unknown[] = [];
+    socket.onRender((frame) => seen.push(frame));
+    const own = { ...RENDER, turn_id: null };
+    FakeSocket.last().push(own);
+
+    expect(seen).toEqual([own]);
+  });
+
   it("ignores a frame type it does not know", async () => {
     await connected();
     expect(() => FakeSocket.last().push({ type: "weather" })).not.toThrow();

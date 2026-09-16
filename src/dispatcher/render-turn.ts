@@ -34,7 +34,7 @@ const baseLog = createLogger("render-turn");
 export interface RenderTurnDeps {
   turnOutput: TurnOutput;
   /** Which push turns the user stopped — a frame of one of them never plays. */
-  pushTurns: Pick<PushTurns, "rendered" | "isCut">;
+  pushTurns: Pick<PushTurns, "rendered" | "isCut" | "cutCount">;
   /** Render sink for a cue with no audio behind it. */
   renderer: Pick<Renderer, "applyDirective">;
   /** Conversation transcript — the reply half of a push turn lands here. */
@@ -81,6 +81,7 @@ export function createRenderTurn(deps: RenderTurnDeps): RenderTurn {
           turn_id: frame.turn_id,
           segments: segments.length,
           dropped: "cut_turn",
+          stopped_count: deps.pushTurns.cutCount(),
         });
         return false;
       }
@@ -97,7 +98,7 @@ export function createRenderTurn(deps: RenderTurnDeps): RenderTurn {
         const speaks = Boolean(speech.trim()) && !isSilenceToken(speech);
 
         if (speaks) {
-          if (Object.keys(cue).length > 0) deps.turnOutput.cue(cue);
+          if (Object.keys(cue).length > 0) deps.turnOutput.cueWithSpeech(cue);
           // The newline is a sentence boundary to the segmenter, so a segment that ends without a
           // terminator still closes here instead of running into the next segment and its cue.
           deps.turnOutput.delta(`${speech}\n`);
