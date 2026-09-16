@@ -48,7 +48,12 @@ turns in and finished replies out. The contract both sides speak is
 
 ## Install
 
-The gateway loads plugins from `~/.hermes/plugins/`. Link this directory in:
+[`skills/yui-platform-install/SKILL.md`](skills/yui-platform-install/SKILL.md) walks a host through
+the whole install, one checked step at a time. The rest of this section is the reference the skill
+draws on.
+
+The gateway loads plugins from `~/.hermes/plugins/`, and from
+`~/.hermes/profiles/<profile>/plugins/` for one profile alone. Link this directory in:
 
 ```bash
 ln -s "$PWD/integrations/hermes/platform/yui" ~/.hermes/plugins/yui
@@ -58,21 +63,21 @@ A copy works the same way. The directory name is the plugin id, so keep it `yui`
 
 ## Enable
 
-Two gates in `~/.hermes/config.yaml`, both required:
+Three top-level blocks in the config the profile reads, `~/.hermes/profiles/<profile>/config.yaml`
+for a profile install and `~/.hermes/config.yaml` for the global one:
 
 ```yaml
 plugins:
   enabled:
     - yui
 
-gateway:
-  platforms:
-    yui:
-      enabled: true
-      extra:
-        host: 127.0.0.1
-        port: 8646
-        key: "<the same chat API key the client sends>"
+platforms:
+  yui:
+    enabled: true
+    extra:
+      host: 127.0.0.1
+      port: 8646
+      key: "<the same chat API key the client sends>"
 
 platform_toolsets:
   yui: [hermes-cli, delegation, yui]
