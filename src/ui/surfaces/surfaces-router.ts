@@ -32,13 +32,7 @@ export function createSurfacesRouter({
   > => (getMode() === "popped" ? remote : local);
   const input = (): Pick<
     Surfaces,
-    | "summonInput"
-    | "dismissInput"
-    | "isInputOpen"
-    | "setInputEnabled"
-    | "setBusy"
-    | "showInputError"
-    | "setAttachmentLimits"
+    "summonInput" | "dismissInput" | "isInputOpen" | "setInputEnabled" | "showInputError"
   > => (getMode() === "popped" ? remote : local);
 
   // Speech left behind on the side being abandoned would hang there with nothing to dismiss it,
@@ -75,9 +69,16 @@ export function createSurfacesRouter({
     dismissInput: () => input().dismissInput(),
     isInputOpen: () => input().isInputOpen(),
     setInputEnabled: (enabled) => input().setInputEnabled(enabled),
-    setBusy: (busy) => input().setBusy(busy),
+    // Busy and the attachment limits go to both sides, so the side a mode flip reveals is current.
+    setBusy(busy) {
+      local.setBusy(busy);
+      remote.setBusy(busy);
+    },
     showInputError: (message, action) => input().showInputError(message, action),
-    setAttachmentLimits: (limits) => input().setAttachmentLimits(limits),
+    setAttachmentLimits(limits) {
+      local.setAttachmentLimits(limits);
+      remote.setAttachmentLimits(limits);
+    },
 
     onSubmit(cb) {
       local.onSubmit(cb);
