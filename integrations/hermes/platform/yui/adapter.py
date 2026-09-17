@@ -296,6 +296,8 @@ class YuiAdapter(BasePlatformAdapter):
         if chat_id and self._sockets.get(chat_id) is ws:
             del self._sockets[chat_id]
             state.set_connected(chat_id, False)
+            # Client turn ids restart at 1 per process, so a mark left here would name a new turn.
+            state.forget_joined(chat_id)
             logger.info("yui: client gone chat=%s", chat_id)
 
     def _adopt_home_channel(self, chat_id: str) -> None:
@@ -336,15 +338,18 @@ class YuiAdapter(BasePlatformAdapter):
             await self._send_frame(chat_id, {"type": "turn_end", "turn_id": turn_id})
             return
         logger.info("yui: turn accepted chat=%s turn_id=%s chars=%d", chat_id, turn_id, len(text))
-        await self.handle_message(
-            MessageEvent(
-                text=text,
-                message_type=MessageType.TEXT,
-                message_id=turn_id,
-                allow_gateway_control=False,
-                source=self._source(chat_id),
-            )
+        event = MessageEvent(
+            text=text,
+            message_type=MessageType.TEXT,
+            message_id=turn_id,
+            allow_gateway_control=False,
+            source=self._source(chat_id),
         )
+        # A busy session may take this text into the turn it runs; the mark goes down before the
+        # dispatch because the gateway can run this turn's own hooks inside that call.
+        if self._event_session_key(event) in self._active_sessions:
+            state.mark_joined(chat_id, turn_id)
+        await self.handle_message(event)
 
     async def _on_reset(self, chat_id: str) -> None:
         """The gateway's own /new: the transcript starts empty under the same chat."""
@@ -690,6 +695,8 @@ class YuiAdapter(BasePlatformAdapter):
         self._forget_reasoning(chat_id)
         internal = getattr(event, "internal", False)
         message_id = getattr(event, "message_id", "") or ""
+        # Hooks of its own make this a turn, so it ends on its own and not with the one it joined.
+        state.drop_joined(chat_id, message_id)
         turn_id = _mint_turn_id() if internal or not message_id else message_id
         # A minted id has nowhere else to live, and the completion of that event has to find it.
         event._yui_turn_id = turn_id

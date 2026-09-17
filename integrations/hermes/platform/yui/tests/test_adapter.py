@@ -729,6 +729,104 @@ async def test_a_follow_up_completed_inside_an_open_turn_waits_for_the_outer_one
     assert (await recv(ws))["type"] == "delegations"
 
 
+async def test_a_turn_the_gateway_takes_into_the_running_one_ends_with_it(client, adapter):
+    """Steered or redirected into the running turn, it never gets hooks of its own."""
+    ws = await ready(client)
+    running = user_turn(adapter, "777")
+    await adapter.on_processing_start(running)
+    adapter._active_sessions[adapter._event_session_key(running)] = object()
+    await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
+    await wait_for(lambda: adapter.dispatched)
+    await adapter.on_processing_complete(running, ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
+    # The next frame proves the two ends were all the pair sent.
+    adapter.notify_delegations(CHAT)
+    assert (await recv(ws))["type"] == "delegations"
+
+
+async def test_a_turn_the_gateway_gives_hooks_of_its_own_keeps_its_id(client, adapter):
+    """Interrupted into a turn of its own, it names its reply and ends ahead of the outer turn."""
+    ws = await ready(client)
+    running = user_turn(adapter, "777")
+    await adapter.on_processing_start(running)
+    adapter._active_sessions[adapter._event_session_key(running)] = object()
+    await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
+    await wait_for(lambda: adapter.dispatched)
+    joined = user_turn(adapter, "778")
+    await adapter.on_processing_start(joined)
+    await adapter.send(CHAT, "answer", metadata={"notify": True})
+    render = await recv(ws)
+    assert render["type"] == "render"
+    assert render["turn_id"] == "778"
+    await adapter.on_processing_complete(joined, ProcessingOutcome.SUCCESS)
+    await adapter.on_processing_complete(running, ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    # The next frame proves each of the two ids ended exactly once.
+    adapter.notify_delegations(CHAT)
+    assert (await recv(ws))["type"] == "delegations"
+
+
+async def test_hooks_that_fire_inside_the_dispatch_keep_the_turn_they_belong_to(client, adapter):
+    """The gateway awaits its busy handler inline, so the later turn's hooks run inside the accept."""
+    ws = await ready(client)
+    running = user_turn(adapter, "777")
+    await adapter.on_processing_start(running)
+    adapter._active_sessions[adapter._event_session_key(running)] = object()
+
+    async def hooks_inline(event):
+        await adapter.on_processing_start(event)
+        await adapter.send(CHAT, "answer", metadata={"notify": True})
+        await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+
+    adapter._handle_message_while_active = hooks_inline
+    await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
+    render = await recv(ws)
+    assert render["type"] == "render"
+    assert render["turn_id"] == "778"
+    await adapter.on_processing_complete(running, ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    # The next frame proves each of the two ids ended exactly once.
+    adapter.notify_delegations(CHAT)
+    assert (await recv(ws))["type"] == "delegations"
+
+
+async def test_a_mark_a_departed_client_left_does_not_close_a_new_clients_turn(client, adapter):
+    """Client turn ids restart at 1 per process, so a mark left behind would name a live turn."""
+    ws = await ready(client)
+    adapter._active_sessions[adapter._event_session_key(user_turn(adapter, "1"))] = object()
+    await ws.send_json({"type": "turn", "turn_id": "2", "client_context": "", "text": "and the docs?"})
+    await wait_for(lambda: adapter.dispatched)
+    adapter._active_sessions.clear()
+    await ws.close()
+    await wait_for(lambda: not state.is_connected(CHAT))
+
+    back = await ready(client)
+    await back.send_json({"type": "turn", "turn_id": "2", "client_context": "", "text": "and now?"})
+    await wait_for(lambda: len(adapter.dispatched) == 2)
+    # A turn of the gateway's own ends while turn 2 is still on its way to its hooks.
+    cron = internal_event(adapter, "the nightly build finished")
+    await adapter.on_processing_start(cron)
+    await adapter.on_processing_complete(cron, ProcessingOutcome.SUCCESS)
+    ended = await recv(back)
+    assert ended["type"] == "turn_end"
+    assert ended["turn_id"].startswith("hermes-")
+    # The next frame proves nothing closed the new client's turn.
+    adapter.notify_delegations(CHAT)
+    assert (await recv(back))["type"] == "delegations"
+
+
+async def test_a_turn_that_arrives_on_an_idle_chat_stays_open(client, adapter):
+    ws = await ready(client)
+    await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "how did it go?"})
+    await wait_for(lambda: adapter.dispatched)
+    # The next frame proves the accepted turn closed nothing of its own.
+    adapter.notify_delegations(CHAT)
+    assert (await recv(ws))["type"] == "delegations"
+
+
 async def test_a_failed_turn_ends_after_its_failure_line_renders(client, adapter):
     ws = await ready(client)
     failed = user_turn(adapter, "777")
@@ -742,6 +840,20 @@ async def test_a_failed_turn_ends_after_its_failure_line_renders(client, adapter
         "segments": [{"cues": [], "speech": "Sorry, that one broke."}],
     }
     assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+
+
+async def test_a_turn_joined_to_a_failed_one_ends_behind_its_failure_line(client, adapter):
+    ws = await ready(client)
+    failed = user_turn(adapter, "777")
+    await adapter.on_processing_start(failed)
+    adapter._active_sessions[adapter._event_session_key(failed)] = object()
+    await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
+    await wait_for(lambda: adapter.dispatched)
+    await adapter.on_processing_complete(failed, ProcessingOutcome.FAILURE)
+    await adapter.send(CHAT, "Sorry, that one broke.", metadata={"notify": True})
+    assert (await recv(ws))["type"] == "render"
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
 
 
 async def test_a_failed_turn_with_no_failure_line_ends_before_the_next_turn_opens(client, adapter):

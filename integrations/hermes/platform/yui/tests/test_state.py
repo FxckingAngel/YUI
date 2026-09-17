@@ -83,6 +83,15 @@ def test_closing_ends_every_open_turn_most_recently_opened_first():
     assert state.turn_id("yui") is None
 
 
+def test_closing_ends_the_open_turns_before_the_turns_that_joined_them():
+    state.open_turn("yui", "17893")
+    state.open_turn("yui", "17894")
+    state.mark_joined("yui", "17895")
+    state.mark_joined("yui", "17896")
+    assert state.close_turns("yui") == ["17894", "17893", "17896", "17895"]
+    assert state.close_turns("yui") == []
+
+
 def test_the_closing_mark_is_taken_once():
     state.mark_closing("yui")
     assert state.take_closing("yui") is True

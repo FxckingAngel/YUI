@@ -101,6 +101,8 @@ class BasePlatformAdapter:
         self.connected = False
         self.fatal: tuple[str, str] | None = None
         self._message_handler = object()  # truthy: the real base drops events without one
+        # The real base holds an interrupt Event per busy session; tests only ask who is in here.
+        self._active_sessions: dict[str, object] = {}
 
     @property
     def name(self) -> str:
@@ -114,9 +116,21 @@ class BasePlatformAdapter:
             **{k: kwargs[k] for k in known if kwargs.get(k) is not None},
         )
 
+    def _event_session_key(self, event: MessageEvent) -> str:
+        """The real base builds ``agent:<ns>:<platform>:<chat_type>:<chat_id>...`` from the source."""
+        source = event.source
+        platform = getattr(getattr(source, "platform", None), "value", "stub")
+        chat_type = getattr(source, "chat_type", "dm")
+        return ":".join(("agent:main", platform, chat_type, getattr(source, "chat_id", "") or ""))
+
     async def handle_message(self, event: MessageEvent) -> None:
         self.dispatched.append(event)
         event._gateway_accepted = True
+        if self._event_session_key(event) in self._active_sessions:
+            await self._handle_message_while_active(event)
+
+    async def _handle_message_while_active(self, event: MessageEvent) -> None:
+        """The real base awaits its busy handler here; tests replace it to fire the event's hooks."""
 
     def _should_auto_tts_for_chat(self, chat_id: str) -> bool:
         """The real base answers from voice.auto_tts; True here so an override is visible."""
