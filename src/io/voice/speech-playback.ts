@@ -26,6 +26,23 @@ import {
 /** Ease duration (ms) to return the expression to neutral after speech ends — slow (no snap). */
 const EMOTION_REVERT_MS = 1000;
 
+/** Two cues as one. A later value wins the field it carries; an empty value never overrides. */
+function mergeCues(base: ExpressArgs | null, next: ExpressArgs): ExpressArgs {
+  const merged: ExpressArgs = { ...base };
+  if (next.emotion_id) merged.emotion_id = next.emotion_id;
+  if (next.motion_id) merged.motion_id = next.motion_id;
+  return merged;
+}
+
+/** The render channels of a cue, in the renderer's shape. The voice channels need audio, so they stay out. */
+function directiveOf(cue: ExpressArgs): ControlEnvelope {
+  return {
+    speech_text: "",
+    ...(cue.emotion_id ? { emotion: { id: cue.emotion_id as EmotionId } } : {}),
+    ...(cue.motion_id ? { motion: { id: cue.motion_id } } : {}),
+  };
+}
+
 interface PlaybackRenderer {
   setMouthOpen(value: number): void;
   stopMouth(): void;
@@ -76,12 +93,16 @@ export interface SpeechPlayback {
    * it in the same stretch of work, so the motion hold has nothing to protect it from.
    */
   setCue(cue: ExpressArgs | null, options?: { withSpeech?: boolean }): void;
+  /** Renders a cue that has no speech of its own, once nothing holds the motion. */
+  silentCue(cue: ExpressArgs): void;
   /**
    * While held (true), null-cue applyCue suppresses playMotion(null) so an externally
    * started looping motion (e.g. thinking) is not reset by cue-less filler sentences.
    * easeEmotionToNeutral still fires — only the motion reset is suppressed.
+   * Returns whether the release (false) applied a motion of its own, which the caller must keep
+   * instead of returning the body to idle.
    */
-  holdMotion(held: boolean): void;
+  holdMotion(held: boolean): boolean;
   /** Interrupts an in-progress utterance: dispose/rebuild the pipeline + release the held bubble immediately. */
   interrupt(opts?: { muteCurrentTurn?: boolean }): void;
   /** Ends a barge-in mute window, so the next reply is spoken and not only shown in the bubble. */
@@ -101,6 +122,8 @@ export function createSpeechPlayback(options: SpeechPlaybackOptions): SpeechPlay
 
   let motionHeld = false;
   let heldCue: ExpressArgs | null = null;
+  // The latest speechless cue that arrived while the motion was held — applied on release.
+  let heldSilentCue: ExpressArgs | null = null;
   // Real audio reached the speakers during the current utterance; cleared on playback-end/interrupt/abort.
   let heardAudio = false;
   let muted = false;
@@ -116,11 +139,7 @@ export function createSpeechPlayback(options: SpeechPlaybackOptions): SpeechPlay
   // fires when a sentence begins playback or its synth fails — audio-timed expression seam.
   function applyCue(cue: ExpressArgs | null): void {
     if (cue?.emotion_id || cue?.motion_id) {
-      renderer.applyDirective({
-        speech_text: "",
-        ...(cue.emotion_id ? { emotion: { id: cue.emotion_id as EmotionId } } : {}),
-        ...(cue.motion_id ? { motion: { id: cue.motion_id } } : {}),
-      });
+      renderer.applyDirective(directiveOf(cue));
     } else {
       renderer.easeEmotionToNeutral(EMOTION_REVERT_MS);
       if (!motionHeld && !options.isStrolling()) renderer.playMotion(null);
@@ -232,17 +251,30 @@ export function createSpeechPlayback(options: SpeechPlaybackOptions): SpeechPlay
         pipeline.setCue(cue);
       }
     },
+    silentCue(cue) {
+      // Segments of one frame park together, the way a segment's own cues merge before they arrive.
+      if (motionHeld) heldSilentCue = mergeCues(heldSilentCue, cue);
+      else renderer.applyDirective(directiveOf(cue));
+    },
     holdMotion(held) {
       if (held) {
         motionHeld = true;
         heldCue = null;
-      } else {
-        motionHeld = false;
-        if (heldCue !== null) {
-          pipeline.setCue(heldCue);
-          heldCue = null;
-        }
+        // A new hold belongs to a newer turn — the cue parked under the old one is superseded.
+        heldSilentCue = null;
+        return false;
       }
+      motionHeld = false;
+      if (heldCue !== null) {
+        pipeline.setCue(heldCue);
+        heldCue = null;
+      }
+      const silent = heldSilentCue;
+      heldSilentCue = null;
+      if (silent === null) return false;
+      renderer.applyDirective(directiveOf(silent));
+      // An empty motion is no motion — directiveOf leaves the channel out for it.
+      return Boolean(silent.motion_id);
     },
     interrupt(opts) {
       stripper.reset();
@@ -254,6 +286,7 @@ export function createSpeechPlayback(options: SpeechPlaybackOptions): SpeechPlay
       // The disposed pipeline never fires its boundary — a callback still waiting on it would
       // otherwise fire on whatever drains next, applying a now-superseded turn's cue.
       drainedCallbacks = [];
+      heldSilentCue = null;
       // Release the held bubble immediately (not deferred).
       surfaces.endSpeech();
       const reported = closeTracked(split);
@@ -272,6 +305,7 @@ export function createSpeechPlayback(options: SpeechPlaybackOptions): SpeechPlay
       pipeline.dispose();
       // No next turn to drain them, and nothing here should still speak.
       drainedCallbacks = [];
+      heldSilentCue = null;
       surfaces.endSpeech();
       closeTracked(split);
       // Terminal like onPlaybackEnd — no next turn to re-assert an expression, so always ease.

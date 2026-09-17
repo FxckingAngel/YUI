@@ -20,7 +20,6 @@ import type { RenderFrame } from "../io/chat/push-socket";
 import type { AudioSink } from "../io/voice/audio-player";
 import { createSpeechPlayback } from "../io/voice/speech-playback";
 import type { TtsSynth } from "../io/voice/tts-synth";
-import { wireStopControl } from "./wire-window-sync";
 
 /** A synth the test releases one sentence at a time; the wav names its own index. */
 function controlledSynth() {
@@ -51,7 +50,7 @@ function heldSink(played: string[]) {
   return { sink, finish: () => holds.shift()?.() };
 }
 
-function frame(speech: string, turnId: string | null): RenderFrame {
+function frame(speech: string, turnId: string): RenderFrame {
   return { type: "render", turn_id: turnId, source: "hermes", segments: [{ speech }] };
 }
 
@@ -102,8 +101,7 @@ function setup() {
       renderer.playMotion({ id: "thinking" });
     },
     thinkingEnd: () => {
-      speechPlayback.holdMotion(false);
-      renderer.playMotion(null);
+      if (!speechPlayback.holdMotion(false)) renderer.playMotion(null);
     },
     delta: (text) => speechPlayback.onSpeechDelta(text),
     speak: (text) => speechPlayback.onSpeech(text),
@@ -111,6 +109,7 @@ function setup() {
     abort: () => speechPlayback.abort(),
     cue: (args) => speechPlayback.setCue(args),
     cueWithSpeech: (args) => speechPlayback.setCue(args, { withSpeech: true }),
+    silentCue: (args) => speechPlayback.silentCue(args),
     toolStatus: () => {},
     activity: () => {},
     releaseMute: () => speechPlayback.releaseMute(),
@@ -118,12 +117,7 @@ function setup() {
     onQueueDrained: (callback) => speechPlayback.onQueueDrained(callback),
   };
 
-  const renderTurn = createRenderTurn({
-    turnOutput,
-    pushTurns,
-    renderer,
-    logger: makeLogger(),
-  });
+  const renderTurn = createRenderTurn({ turnOutput, pushTurns, logger: makeLogger() });
 
   // The bridge the backend call holds: up at send, down once, whichever way the wait ends.
   let thinkingDone = false;
@@ -133,15 +127,12 @@ function setup() {
     turnOutput.thinkingEnd(1);
   };
 
-  let onStop = (): void => {};
-  wireStopControl({
-    onStop: (callback) => {
-      onStop = callback;
-    },
-    cancel: () => {},
-    stopSpeech: () => speechPlayback.interrupt(),
-    cutPushTurns: () => pushTurns.cut(),
-  });
+  // The stop closure bootstrap-configured hands to surfaces.onStop — the session reset runs the
+  // same one: the outstanding turns are cut and the queued speech is stopped.
+  const stopTurn = (): void => {
+    pushTurns.cut();
+    speechPlayback.interrupt();
+  };
 
   return {
     played,
@@ -156,13 +147,14 @@ function setup() {
     speakFiller: (text: string): void => speechPlayback.speakAside(text),
     /** A cue on its own, the way a streamed express cue arrives ahead of its speech. */
     cue: (args: ExpressArgs): void => turnOutput.cue(args),
-    /** Sends a turn the way the backend call does, bridge and all, and waits for its render. */
+    /** Sends a turn the way the backend call does, bridge and all, and waits for its end. */
     openTurn: (turnId: string): void => {
       pushTurns.opened(turnId);
       turnOutput.thinkingStart(1);
-      void pushTurns.awaitFirstRender(turnId, endThinking).then(endThinking);
+      // call()'s finally ends the bridge however the wait settles; onFirstRender is the render half.
+      void pushTurns.awaitTurnEnd(turnId, { onFirstRender: endThinking }).then(endThinking);
     },
-    stopButton: () => onStop(),
+    stopButton: () => stopTurn(),
     // The pair voice-pipeline-wiring performs when the user talks over the reply.
     bargeIn: () => {
       speechPlayback.interrupt({ muteCurrentTurn: true });
@@ -184,7 +176,7 @@ describe("a reply the backend starts on its own, after the user stopped the last
     seq.renderTurn.render(frame("Three logs are left.", "1"));
     expect(seq.synth.inputs).toEqual(["Let me look."]);
 
-    seq.renderTurn.render(frame("One more thing.", null));
+    seq.renderTurn.render(frame("One more thing.", "hermes-1"));
     expect(seq.synth.inputs).toEqual(["Let me look.", "One more thing."]);
     seq.synth.deliver(1);
     await vi.waitFor(() => expect(seq.played).toEqual(["play:0", "play:1"]));
@@ -202,7 +194,7 @@ describe("a reply the backend starts on its own, after the user stopped the last
     seq.renderTurn.render(frame("And the rest.", "2"));
     expect(seq.synth.inputs).toEqual(["Long answer."]);
 
-    seq.renderTurn.render(frame("One more thing.", null));
+    seq.renderTurn.render(frame("One more thing.", "hermes-1"));
     expect(seq.synth.inputs).toEqual(["Long answer.", "One more thing."]);
     seq.synth.deliver(1);
     await vi.waitFor(() => expect(seq.played).toEqual(["play:0", "play:1"]));
@@ -298,7 +290,7 @@ describe("a reply for another turn, arriving while a bridge is up", () => {
 
   it.each([
     ["another turn's", "B"],
-    ["one the backend started on its own", null],
+    ["one the backend started on its own", "hermes-1"],
   ])("gives each segment of %s reply its own cue", async (_label, turnId) => {
     const seq = setup();
     seq.openTurn("A");
@@ -323,6 +315,25 @@ describe("a reply for another turn, arriving while a bridge is up", () => {
     seq.speakFiller("Still working.");
 
     expect(seq.synth.inputs.at(-1)).toBe("Still working.");
+  });
+
+  it("lands a cue-only reply's motion when the bridge it arrived under comes down", () => {
+    const seq = setup();
+    seq.openTurn("A");
+
+    seq.renderTurn.render({
+      type: "render",
+      turn_id: "B",
+      source: "hermes",
+      segments: [{ cues: [{ motion_id: "wave" }] }],
+    });
+
+    expect(seq.motions.at(-1)).toEqual({ id: "thinking" });
+
+    // A's own reply ends its bridge, which is where B's parked cue lands.
+    seq.renderTurn.render({ type: "render", turn_id: "A", source: "hermes", segments: [] });
+
+    expect(seq.motions.at(-1)).toEqual({ id: "wave" });
   });
 
   it("still keeps a filler line off a cue waiting for its own speech", () => {

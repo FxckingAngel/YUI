@@ -63,14 +63,14 @@ let guardrails: Guardrails;
 let dispatcher: Dispatcher;
 let logger: Logger;
 let turnLog: TurnLog;
+let speaking: boolean;
 
 /**
- * Simulates "audio is still playing" independent of any backend call in flight — begins a
- * throwaway turn first if none is current, since a live turn is a precondition for audio-owed
- * (matching how a reply's audio can outlive the call that produced it).
+ * Simulates "audio is still playing" the way the speech pipeline does: it answers the dispatcher
+ * directly, and reports to the ledger as well — where a turn with none current is ignored.
  */
 function setSpeaking(owed: boolean): void {
-  if (!turnLog.current()) turnLog.begin(env());
+  speaking = owed;
   turnLog.setAudioOwed(owed);
 }
 
@@ -97,12 +97,14 @@ beforeEach(() => {
   guardrails = createGuardrails(permissiveGuardrailsConfig(), { now: () => Date.now() });
   logger = makeLogger();
   turnLog = createTurnLog();
+  speaking = false;
   const deps = {
     bus,
     renderer: renderer as never,
     backendCaller,
     guardrails,
     turnLog,
+    hasOutstandingSpeech: () => speaking,
     peek: { enter: peekEnter, exit: peekExit },
     logger,
     peekConfig: () => PEEK_CONFIG,
@@ -203,6 +205,7 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
       backendCaller,
       guardrails,
       turnLog,
+      hasOutstandingSpeech: () => speaking,
       logger,
       onUserTurnFailed: sink,
     });
@@ -602,6 +605,7 @@ describe("dispatcher — onTurnFailed seam", () => {
       backendCaller: caller,
       guardrails,
       turnLog,
+      hasOutstandingSpeech: () => speaking,
       logger,
       onTurnFailed: sink,
       onUserTurnFailed: userSink,

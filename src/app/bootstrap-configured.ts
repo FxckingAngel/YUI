@@ -67,7 +67,7 @@ import { wirePushTransport } from "./wire-push";
 import { wireDispatcherSources, wireWindowSources } from "./wire-sources";
 import { wirePeekExitTriggers, wireSummonHotkey } from "./wire-summon";
 import { wireBroker, wireVoiceInput } from "./wire-voice";
-import { wireGuardrailsOverrides, wireStopControl } from "./wire-window-sync";
+import { wireGuardrailsOverrides } from "./wire-window-sync";
 
 const log = createLogger("bootstrap");
 
@@ -120,6 +120,8 @@ interface ConfiguredBootstrapHandles {
   broker: Awaited<ReturnType<typeof wireBroker>>;
   /** The seat transitions — the dev perch plays its sit-down through it. */
   sitter: Pick<Sitter, "sitDown">;
+  /** Cancels the in-flight turn, cuts the outstanding push turns and stops the queued speech. */
+  stopTurn: () => void;
   dispose(): void;
 }
 
@@ -366,6 +368,7 @@ const realFactories: ConfiguredBootstrapFactories = {
       peekConfig: () => config.get().avatar.peek,
       tapConfig: () => config.get().avatar.tap,
       turnLog,
+      hasOutstandingSpeech: () => voice.turnOutput.hasOutstandingSpeech(),
       pacer,
       appendSkipRecord: (record) => appendRecord(record),
       onTurnFailed: previousTurn.callFailed,
@@ -748,7 +751,6 @@ const realFactories: ConfiguredBootstrapFactories = {
           socket: pushSocket,
           turnOutput: voice.turnOutput,
           pushTurns,
-          renderer,
           delegations,
           reasoning,
           appendTurnRecord: (record) => appendRecord(record),
@@ -758,19 +760,19 @@ const realFactories: ConfiguredBootstrapFactories = {
       );
     }
     ensureActive();
-    wireStopControl({
-      onStop: (callback) => surfaces.onStop(callback),
-      cancel: () => dispatcher.cancel(),
-      // interrupt() stops the queued audio and leaves the pipeline able to speak the next reply.
-      stopSpeech: () => voice.speechPlayback.interrupt(),
-      cutPushTurns: () => pushTurns.cut(),
-    });
+    // The stop button and the panel's session reset share this path; cancel() alone leaves queued speech playing.
+    const stopTurn = (): void => {
+      dispatcher.cancel();
+      pushTurns.cut();
+      voice.speechPlayback.interrupt();
+    };
+    surfaces.onStop(stopTurn);
     surfaces.onSubmit((text, images) => {
       userInput.submit(text, images);
       proactiveSource.noteInteraction();
     });
 
-    return { voice, dispatcher, guardrails, summonHotkey, broker, sitter };
+    return { voice, dispatcher, guardrails, summonHotkey, broker, sitter, stopTurn };
   },
 };
 

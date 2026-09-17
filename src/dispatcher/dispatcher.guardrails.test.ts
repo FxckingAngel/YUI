@@ -94,6 +94,7 @@ beforeEach(() => {
     backendCaller,
     guardrails,
     turnLog,
+    hasOutstandingSpeech: () => false,
     peek: { enter: peekEnter, exit: peekExit },
     logger,
     peekConfig: () => PEEK_CONFIG,
@@ -118,6 +119,7 @@ describe("dispatcher — guardrail gating (§6)", () => {
       backendCaller,
       guardrails: g,
       turnLog,
+      hasOutstandingSpeech: () => false,
       logger,
     });
     return { d, g };
@@ -136,6 +138,7 @@ describe("dispatcher — guardrail gating (§6)", () => {
       backendCaller,
       guardrails: g,
       turnLog,
+      hasOutstandingSpeech: () => false,
       logger,
     });
     d.start();
@@ -243,6 +246,7 @@ describe("dispatcher — global proactive pacer gate", () => {
       backendCaller,
       guardrails: over.guardrails ?? guardrails,
       turnLog,
+      hasOutstandingSpeech: () => false,
       logger,
       peekConfig: () => PEEK_CONFIG,
       tapConfig: () => TAP_CONFIG,

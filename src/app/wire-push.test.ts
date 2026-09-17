@@ -3,17 +3,22 @@
  */
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type { ControlEnvelope } from "../contract";
 import { createPushTurns } from "../dispatcher/push-turn";
 import { makeTurnOutput } from "../dispatcher/test-helpers";
 import { createDelegationsStore } from "../io/bridge/delegations-store";
 import { createReasoningStore } from "../io/bridge/reasoning-store";
 import type { ChatHistoryEntry } from "../io/chat/chat-history-store";
-import type { DelegationItem, PushSocketState, RenderFrame } from "../io/chat/push-socket";
+import type {
+  DelegationItem,
+  PushSocketState,
+  RenderFrame,
+  TurnEndFrame,
+} from "../io/chat/push-socket";
 import { wirePushMode, wirePushTransport } from "./wire-push";
 
 function fakeSocket() {
   let renderCb: ((frame: RenderFrame) => void) | null = null;
+  let turnEndCb: ((frame: TurnEndFrame) => void) | null = null;
   let delegationsCb: ((items: DelegationItem[]) => void) | null = null;
   let reasoningCb: ((delta: string) => void) | null = null;
   let stateCb: ((state: PushSocketState) => void) | null = null;
@@ -23,6 +28,12 @@ function fakeSocket() {
       renderCb = cb;
       return () => {
         renderCb = null;
+      };
+    },
+    onTurnEnd(cb: (frame: TurnEndFrame) => void) {
+      turnEndCb = cb;
+      return () => {
+        turnEndCb = null;
       };
     },
     onDelegations(cb: (items: DelegationItem[]) => void) {
@@ -46,6 +57,9 @@ function fakeSocket() {
     pushRender(frame: RenderFrame): void {
       renderCb?.(frame);
     },
+    pushTurnEnd(frame: TurnEndFrame): void {
+      turnEndCb?.(frame);
+    },
     pushDelegations(items: DelegationItem[]): void {
       delegationsCb?.(items);
     },
@@ -56,6 +70,7 @@ function fakeSocket() {
       stateCb?.(state);
     },
     hasRenderSubscriber: () => renderCb !== null,
+    hasTurnEndSubscriber: () => turnEndCb !== null,
     hasDelegationsSubscriber: () => delegationsCb !== null,
     hasReasoningSubscriber: () => reasoningCb !== null,
     hasStateSubscriber: () => stateCb !== null,
@@ -95,7 +110,6 @@ let pushTurns: ReturnType<typeof createPushTurns>;
 let delegations: ReturnType<typeof createDelegationsStore>;
 let reasoning: ReturnType<typeof createReasoningStore>;
 let records: unknown[];
-let directives: ControlEnvelope[];
 let transcript: ChatHistoryEntry[];
 let log: ReturnType<typeof fakeLog>;
 
@@ -104,7 +118,6 @@ function wire() {
     socket,
     turnOutput,
     pushTurns,
-    renderer: { applyDirective: (env) => directives.push(env) },
     delegations,
     reasoning,
     appendTurnRecord: (record) => records.push(record),
@@ -120,7 +133,6 @@ beforeEach(() => {
   delegations = createDelegationsStore();
   reasoning = createReasoningStore();
   records = [];
-  directives = [];
   transcript = [];
   log = fakeLog();
 });
@@ -143,16 +155,16 @@ describe("wirePushTransport", () => {
     expect(transcript).toEqual([{ role: "assistant", text: "All green.", ts: expect.any(Number) }]);
   });
 
-  it("renders a silent frame's cues through the renderer it was given", () => {
+  it("sends a silent frame's cues out as a speechless cue", () => {
     wire();
     socket.pushRender({
       type: "render",
-      turn_id: null,
+      turn_id: "hermes-1",
       source: "hermes",
       segments: [{ cues: [{ emotion_id: "sad" }], speech: "[SILENT]" }],
     });
 
-    expect(directives).toEqual([{ speech_text: "", emotion: { id: "sad" } }]);
+    expect(turnOutput.silentCue).toHaveBeenCalledWith({ emotion_id: "sad" });
   });
 
   it("replaces the delegations list with each frame", () => {
@@ -200,6 +212,17 @@ describe("wirePushTransport", () => {
     expect(reasoning.get()).toEqual({ text: "", live: false });
   });
 
+  it("forgets the turn and logs it when its turn_end arrives", () => {
+    wire();
+    pushTurns.opened("7");
+
+    socket.pushTurnEnd({ type: "turn_end", turn_id: "7" });
+
+    expect(log.info).toHaveBeenCalledWith("push.turn_end", { turn_id: "7" });
+    pushTurns.cut();
+    expect(pushTurns.isCut("7")).toBe(false);
+  });
+
   it("keeps a reasoning text an earlier render finished when a later frame is dropped", () => {
     wire();
     pushTurns.opened("7");
@@ -225,6 +248,7 @@ describe("wirePushTransport", () => {
     dispose();
 
     expect(socket.hasRenderSubscriber()).toBe(false);
+    expect(socket.hasTurnEndSubscriber()).toBe(false);
     expect(socket.hasDelegationsSubscriber()).toBe(false);
     expect(socket.hasReasoningSubscriber()).toBe(false);
     expect(socket.hasStateSubscriber()).toBe(false);

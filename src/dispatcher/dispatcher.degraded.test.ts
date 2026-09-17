@@ -93,6 +93,7 @@ beforeEach(() => {
     backendCaller,
     guardrails,
     turnLog,
+    hasOutstandingSpeech: () => false,
     peek: { enter: peekEnter, exit: peekExit },
     logger,
     peekConfig: () => PEEK_CONFIG,

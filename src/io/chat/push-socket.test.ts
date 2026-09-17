@@ -613,6 +613,51 @@ describe("createPushSocket — disconnect", () => {
     expect(socket.getState()).toEqual({ kind: "disconnected" });
   });
 
+  it("opens one socket when a disconnect and a connect race the key lookup", async () => {
+    let releaseKey!: (key: string) => void;
+    const pendingKey = new Promise<string>((resolve) => {
+      releaseKey = resolve;
+    });
+    socket = build({ getKey: () => pendingKey });
+    socket.connect();
+    socket.disconnect();
+    socket.connect();
+    releaseKey("secret-key");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    FakeSocket.last().accept();
+    FakeSocket.last().push({ type: "ready", chat_id: "yui-3f9a2c1d" });
+    expect(socket.getState()).toEqual({ kind: "ready", chat_id: "yui-3f9a2c1d" });
+  });
+
+  it("opens with the key the reconnecting window asked for, not the one already in flight", async () => {
+    const keys = ["old", "new"];
+    const getKey = vi.fn(async () => keys.shift());
+    let releaseKey!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseKey = resolve;
+    });
+    socket = build({
+      getKey: async () => {
+        const key = await getKey();
+        if (key === "old") await held;
+        return key;
+      },
+    });
+    socket.connect();
+    socket.disconnect();
+    socket.connect();
+    releaseKey();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    FakeSocket.last().accept();
+    expect(FakeSocket.last().frames()[0]!.key).toBe("new");
+  });
+
   it("ignores a second connect while one is already in flight", async () => {
     socket = build();
     socket.connect();
@@ -806,7 +851,7 @@ describe("createPushSocket — inbound frames", () => {
     await connected();
     const seen: unknown[] = [];
     socket.onRender((frame) => seen.push(frame));
-    FakeSocket.last().push({ type: "render", turn_id: null, source: "hermes" });
+    FakeSocket.last().push({ type: "render", turn_id: "7", source: "hermes" });
 
     expect(seen).toEqual([]);
   });
@@ -820,13 +865,57 @@ describe("createPushSocket — inbound frames", () => {
     expect(seen).toEqual([]);
   });
 
-  it("reads a render frame that carries no turn_id as one the backend started on its own", async () => {
+  it("drops a render frame whose turn_id is null", async () => {
     await connected();
     const seen: unknown[] = [];
     socket.onRender((frame) => seen.push(frame));
-    FakeSocket.last().push({ type: "render", source: "hermes", segments: [] });
+    const frame: Record<string, unknown> = { ...RENDER };
+    frame.turn_id = null;
+    FakeSocket.last().push(frame);
 
-    expect(seen).toEqual([{ type: "render", turn_id: null, source: "hermes", segments: [] }]);
+    expect(seen).toEqual([]);
+  });
+
+  it("ignores a render frame carrying a segment that is not an object", async () => {
+    await connected();
+    const seen: unknown[] = [];
+    socket.onRender((frame) => seen.push(frame));
+    FakeSocket.last().push({ ...RENDER, segments: [null] });
+
+    expect(seen).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith("frame_malformed", {
+      type: "render",
+      field: "segments",
+    });
+  });
+
+  it.each([
+    ["not a list", { cues: 5 }],
+    ["a list holding a list", { cues: [[]] }],
+  ])("ignores a render frame whose cues are %s", async (_label, segment) => {
+    await connected();
+    const seen: unknown[] = [];
+    socket.onRender((frame) => seen.push(frame));
+    FakeSocket.last().push({ ...RENDER, segments: [segment] });
+
+    expect(seen).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith("frame_malformed", {
+      type: "render",
+      field: "segments",
+    });
+  });
+
+  it("a throwing subscriber is logged and the others still run", async () => {
+    await connected();
+    const seen: unknown[] = [];
+    socket.onRender(() => {
+      throw new Error("the stage is on fire");
+    });
+    socket.onRender((frame) => seen.push(frame));
+    FakeSocket.last().push(RENDER);
+
+    expect(seen).toEqual([RENDER]);
+    expect(logger.warn).toHaveBeenCalledWith("subscriber_failed", expect.anything());
   });
 
   it("names the field that made a render frame unreadable", async () => {
@@ -839,14 +928,26 @@ describe("createPushSocket — inbound frames", () => {
     });
   });
 
-  it("hands a render frame the backend started on its own to every subscriber", async () => {
+  it("hands a turn_end frame to every subscriber", async () => {
     await connected();
     const seen: unknown[] = [];
-    socket.onRender((frame) => seen.push(frame));
-    const own = { ...RENDER, turn_id: null };
-    FakeSocket.last().push(own);
+    socket.onTurnEnd((frame) => seen.push(frame));
+    FakeSocket.last().push({ type: "turn_end", turn_id: "7" });
 
-    expect(seen).toEqual([own]);
+    expect(seen).toEqual([{ type: "turn_end", turn_id: "7" }]);
+  });
+
+  it("drops a turn_end frame whose turn_id is not a string", async () => {
+    await connected();
+    const seen: unknown[] = [];
+    socket.onTurnEnd((frame) => seen.push(frame));
+    FakeSocket.last().push({ type: "turn_end", turn_id: 5 });
+
+    expect(seen).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith("frame_malformed", {
+      type: "turn_end",
+      field: "turn_id",
+    });
   });
 
   it("ignores a frame type it does not know", async () => {

@@ -64,9 +64,10 @@ let guardrails: Guardrails;
 let dispatcher: Dispatcher;
 let logger: Logger;
 let turnLog: TurnLog;
+let speaking: boolean;
 
 function setSpeaking(owed: boolean): void {
-  if (!turnLog.current()) turnLog.begin(env());
+  speaking = owed;
   turnLog.setAudioOwed(owed);
 }
 
@@ -93,12 +94,14 @@ beforeEach(() => {
   guardrails = createGuardrails(permissiveGuardrailsConfig(), { now: () => Date.now() });
   logger = makeLogger();
   turnLog = createTurnLog();
+  speaking = false;
   const deps = {
     bus,
     renderer: renderer as never,
     backendCaller,
     guardrails,
     turnLog,
+    hasOutstandingSpeech: () => speaking,
     peek: { enter: peekEnter, exit: peekExit },
     logger,
     peekConfig: () => PEEK_CONFIG,
@@ -293,6 +296,8 @@ describe("dispatcher — playback-gated drain (§337)", () => {
 
     expect(backendCaller.call as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
     expect(dispatcher.queue()).toContain(queued);
+    // The backend started this speech on its own, so no turn on the ledger owns it.
+    expect(turnLog.current()).toBeNull();
     expect(dispatcher.recentDrops(10).map((drop) => drop.event_name)).not.toContain(
       queued.event_name,
     );

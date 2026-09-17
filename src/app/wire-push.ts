@@ -10,10 +10,10 @@ import type {
   PushSocket,
   PushSocketState,
   RenderFrame,
+  TurnEndFrame,
 } from "../io/chat/push-socket";
 import type { RenderRecord } from "../io/chat/turn-record-log";
 import type { Logger } from "../logger";
-import type { Renderer } from "../renderer";
 
 /**
  * Routes an open push socket into the client: a `render` frame plays as a turn and closes the
@@ -24,6 +24,7 @@ import type { Renderer } from "../renderer";
 export function wirePushTransport(deps: {
   socket: {
     onRender(cb: (frame: RenderFrame) => void): () => void;
+    onTurnEnd(cb: (frame: TurnEndFrame) => void): () => void;
     onDelegations(cb: (items: DelegationItem[]) => void): () => void;
     onReasoning(cb: (delta: string) => void): () => void;
     onState(cb: (state: PushSocketState) => void): () => void;
@@ -31,8 +32,6 @@ export function wirePushTransport(deps: {
   turnOutput: TurnOutput;
   /** Which push turns the user stopped — a frame of one of them never plays. */
   pushTurns: PushTurns;
-  /** Render sink for a cue on a segment that speaks nothing. */
-  renderer: Pick<Renderer, "applyDirective">;
   delegations: DelegationsStore;
   reasoning: ReasoningStore;
   appendTurnRecord: (record: RenderRecord) => void;
@@ -43,7 +42,6 @@ export function wirePushTransport(deps: {
   const renderTurn = createRenderTurn({
     turnOutput: deps.turnOutput,
     pushTurns: deps.pushTurns,
-    renderer: deps.renderer,
     appendTurnRecord: deps.appendTurnRecord,
     appendTranscript: deps.appendTranscript,
   });
@@ -53,6 +51,11 @@ export function wirePushTransport(deps: {
       // under: the cycle it was writing is abandoned, an earlier finished text is left alone.
       if (renderTurn.render(frame)) deps.reasoning.finish(frame.reasoning);
       else deps.reasoning.interrupt();
+    }),
+    deps.socket.onTurnEnd((frame) => {
+      // The frame the running state was waiting for: the turn is forgotten, whatever it held.
+      deps.pushTurns.ended(frame.turn_id);
+      deps.log.info("push.turn_end", { turn_id: frame.turn_id });
     }),
     deps.socket.onDelegations((items) => {
       deps.delegations.replace(items);

@@ -93,6 +93,7 @@ beforeEach(() => {
     backendCaller,
     guardrails,
     turnLog,
+    hasOutstandingSpeech: () => false,
     peek: { enter: peekEnter, exit: peekExit },
     logger,
     peekConfig: () => PEEK_CONFIG,
@@ -119,6 +120,7 @@ describe("dispatcher — cooldown state mirror (§6.3/§9)", () => {
       backendCaller,
       guardrails: g,
       turnLog,
+      hasOutstandingSpeech: () => false,
       logger,
     });
     d.start();

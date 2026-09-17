@@ -720,6 +720,119 @@ describe("createSpeechPlayback — holdMotion buffers and flushes cues", () => {
   });
 });
 
+describe("createSpeechPlayback — a cue with no speech behind it", () => {
+  function playback() {
+    const multi = multiPipelineFactory();
+    const renderer = spyRenderer();
+    const sp = createSpeechPlayback({
+      renderer,
+      surfaces: spySurfaces(),
+      pipeline: NO_PIPELINE,
+      createPipeline: multi.factory,
+      isStrolling: () => false,
+    });
+    return { sp, renderer, multi };
+  }
+
+  it("applies the cue's emotion and motion at once when no motion is held", () => {
+    const { sp, renderer, multi } = playback();
+
+    sp.silentCue({ emotion_id: "sad", motion_id: "sit" });
+
+    expect(renderer.applyDirective).toHaveBeenCalledWith({
+      speech_text: "",
+      emotion: { id: "sad" },
+      motion: { id: "sit" },
+    });
+    expect(multi.instances[0].setCue).not.toHaveBeenCalled();
+  });
+
+  it("waits out a held motion, then applies the cue once on release", () => {
+    const { sp, renderer } = playback();
+
+    sp.holdMotion(true);
+    sp.silentCue({ motion_id: "wave" });
+    expect(renderer.applyDirective).not.toHaveBeenCalled();
+
+    expect(sp.holdMotion(false)).toBe(true);
+    expect(renderer.applyDirective.mock.calls).toEqual([
+      [{ speech_text: "", motion: { id: "wave" } }],
+    ]);
+  });
+
+  it("merges the cues that arrived while the motion was held into one directive", () => {
+    const { sp, renderer } = playback();
+
+    sp.holdMotion(true);
+    sp.silentCue({ motion_id: "wave" });
+    sp.silentCue({ emotion_id: "happy" });
+    sp.holdMotion(false);
+
+    expect(renderer.applyDirective.mock.calls).toEqual([
+      [{ speech_text: "", emotion: { id: "happy" }, motion: { id: "wave" } }],
+    ]);
+  });
+
+  it("lets a later value win the field it carries, leaving the rest of the parked cue alone", () => {
+    const { sp, renderer } = playback();
+
+    sp.holdMotion(true);
+    sp.silentCue({ emotion_id: "sad", motion_id: "sit" });
+    sp.silentCue({ emotion_id: "happy" });
+    sp.holdMotion(false);
+
+    expect(renderer.applyDirective.mock.calls).toEqual([
+      [{ speech_text: "", emotion: { id: "happy" }, motion: { id: "sit" } }],
+    ]);
+  });
+
+  it.each([
+    ["interrupt", (sp: ReturnType<typeof createSpeechPlayback>) => sp.interrupt()],
+    ["abort", (sp: ReturnType<typeof createSpeechPlayback>) => sp.abort()],
+  ])("drops a parked cue the user's %s swept away", (_label, stop) => {
+    const { sp, renderer } = playback();
+
+    sp.holdMotion(true);
+    sp.silentCue({ motion_id: "wave" });
+    stop(sp);
+    renderer.applyDirective.mockClear();
+
+    expect(sp.holdMotion(false)).toBe(false);
+    expect(renderer.applyDirective).not.toHaveBeenCalled();
+  });
+
+  it("discards the cue parked under the previous hold when a new one goes up", () => {
+    const { sp, renderer } = playback();
+
+    sp.holdMotion(true);
+    sp.silentCue({ motion_id: "wave" });
+    sp.holdMotion(true);
+
+    expect(sp.holdMotion(false)).toBe(false);
+    expect(renderer.applyDirective).not.toHaveBeenCalled();
+  });
+
+  it("reports no motion applied when the release had no cue parked", () => {
+    const { sp } = playback();
+
+    sp.holdMotion(true);
+
+    expect(sp.holdMotion(false)).toBe(false);
+  });
+
+  it.each([
+    ["emotion alone", { emotion_id: "happy" }],
+    ["an empty motion, which the directive leaves out", { motion_id: "" }],
+  ])("reports no motion applied when the parked cue carried %s", (_label, cue) => {
+    const { sp } = playback();
+
+    sp.holdMotion(true);
+    sp.silentCue(cue);
+
+    expect(sp.holdMotion(false)).toBe(false);
+  });
+});
+
 describe("createSpeechPlayback — onCuePlay drives renderer directives", () => {
   it("onCuePlay with emotion_id+motion_id calls applyDirective with both mapped fields", () => {
     const stub = stubPipelineFactory();

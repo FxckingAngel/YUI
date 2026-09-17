@@ -63,9 +63,10 @@ let guardrails: Guardrails;
 let dispatcher: Dispatcher;
 let logger: Logger;
 let turnLog: TurnLog;
+let speaking: boolean;
 
 function setSpeaking(owed: boolean): void {
-  if (!turnLog.current()) turnLog.begin(env());
+  speaking = owed;
   turnLog.setAudioOwed(owed);
 }
 
@@ -92,12 +93,14 @@ beforeEach(() => {
   guardrails = createGuardrails(permissiveGuardrailsConfig(), { now: () => Date.now() });
   logger = makeLogger();
   turnLog = createTurnLog();
+  speaking = false;
   const deps = {
     bus,
     renderer: renderer as never,
     backendCaller,
     guardrails,
     turnLog,
+    hasOutstandingSpeech: () => speaking,
     peek: { enter: peekEnter, exit: peekExit },
     logger,
     peekConfig: () => PEEK_CONFIG,
@@ -355,6 +358,7 @@ describe("dispatcher — routing (§5.1)", () => {
       backendCaller,
       guardrails,
       turnLog,
+      hasOutstandingSpeech: () => speaking,
       logger,
       peekConfig: () => livePeekConfig,
       tapConfig: () => TAP_CONFIG,
@@ -454,6 +458,7 @@ describe("dispatcher — routing (§5.1)", () => {
       backendCaller,
       guardrails,
       turnLog,
+      hasOutstandingSpeech: () => speaking,
       logger,
     });
     dispatcher.start();
@@ -791,13 +796,14 @@ describe("dispatcher — tap emotion revert (touch_emotion_hold_ms)", () => {
     pushEmotionTap();
     await vi.advanceTimersByTimeAsync(20);
     setSpeaking(true);
+    expect(turnLog.current()).toBeNull();
     await vi.advanceTimersByTimeAsync(TAP_CONFIG.touch_emotion_hold_ms);
     expect(easeEmotionToNeutral).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(TAP_CONFIG.touch_emotion_hold_ms * 2);
     expect(easeEmotionToNeutral).not.toHaveBeenCalled();
   });
 
-  it("fires while a silent backend call is in flight (regression: isAudioOwed, not !isOver)", async () => {
+  it("fires while a silent backend call is in flight (regression: speech owed, not !isOver)", async () => {
     dispatcher.start();
     pushEmotionTap();
     await vi.advanceTimersByTimeAsync(20);

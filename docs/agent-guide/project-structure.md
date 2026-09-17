@@ -41,7 +41,7 @@ YUI/
     main.ts                          # Application entry: config load, renderer, dispatcher, and the I/O graph
     app/
       wire-avatar.ts                 # VRM and speaker selection stores, their swap and import flows, and effective endpoints
-      wire-window-sync.ts            # Settings broadcast, stop control, guardrail overrides, and the shared cross-window sync core
+      wire-window-sync.ts            # Settings broadcast, guardrail overrides, and the shared cross-window sync core
       wire-ambient.ts                # Travel frame plus the walk, perch, fall, and climb ambient loops
       wire-sources.ts                # Tauri window sources and the dispatcher's paced proactive sources
       wire-summon.ts                 # Peek exit triggers, tray summon, and the global summon hotkey
