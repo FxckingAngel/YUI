@@ -25,9 +25,10 @@ Any code change — feature · bugfix · refactor · UI · schema · or any chor
 
 - Before designing a solution, look at how established products solve the same problem. Adopt proven patterns and conventions instead of inventing approaches from scratch.
 - Do not preserve backward compatibility. Delete unused paths instead of adding compat layers, fallbacks, or migrations.
-- Choose the simplest implementation that fully meets current requirements. No speculative abstractions, config values, or layers of indirection.
+- Choose the simplest implementation that fully meets current requirements. No speculative abstractions, config values, or layers of indirection. Always write the least code that does the job without harming functionality, readability, or project structure — don't pad it out for its own sake.
 - Grow the system in layers: start from a minimal end-to-end working version and add features on top of working results. Never trade working code for unfinished complexity.
 - Separate components into modules with clear separation of concerns.
+- Write only the test cases needed to confirm a feature actually works. Piling on test cases for volume's sake is an anti-pattern, not thoroughness.
 - Prefer proven, maintained libraries when they lower overall complexity or raise stability. Check already-installed dependencies before implementing something yourself or adding a package — and never claim "this library can't do that" without checking its docs and types.
 - Make architecture decisions with a long-term view. Reject stopgaps that only get past today and must be replaced later.
 
