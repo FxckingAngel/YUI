@@ -105,7 +105,7 @@ def build_schema(vocab: Vocabulary) -> dict:
 def handler(args: dict, **_kwargs: Any) -> str:
     """Gate each cue against the chat's vocabulary and buffer it for the turn in flight."""
     chat_id = session.current_chat_id()
-    vocab = state.vocabulary(chat_id)
+    vocab = state.vocabulary(chat_id) or Vocabulary()
     calls = (args or {}).get("cues")
     results = []
     for call in calls if isinstance(calls, list) else []:
@@ -120,7 +120,7 @@ def handler(args: dict, **_kwargs: Any) -> str:
     return json.dumps({"ok": True, "cues": results}, ensure_ascii=False)
 
 
-def declare(vocab: Vocabulary) -> None:
+def declare(vocab: Vocabulary, chat_id: str = "") -> None:
     """Register the tool with this vocabulary; a repeat with the same schema is skipped."""
     global _declared
     if _ctx is None:
@@ -132,7 +132,8 @@ def declare(vocab: Vocabulary) -> None:
     _ctx.register_tool(name=TOOL_NAME, toolset=TOOLSET, schema=schema, handler=handler)
     _declared = fingerprint
     logger.info(
-        "yui: generate_express schema declared emotions=%d motions=%d emotion_text=%s",
+        "yui: generate_express schema declared chat=%s emotions=%d motions=%d emotion_text=%s",
+        chat_id,
         len(vocab.emotion_ids),
         len(vocab.motion_ids),
         vocab.emotion_text_mode,

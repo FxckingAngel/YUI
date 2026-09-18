@@ -333,7 +333,6 @@ class YuiAdapter(BasePlatformAdapter):
     def _publish_vocabulary(self, chat_id: str, payload: object) -> None:
         vocab = Vocabulary.from_payload(payload)
         state.set_vocabulary(chat_id, vocab)
-        tools.declare(vocab)
 
     def _source(self, chat_id: str):
         return self.build_source(
@@ -801,6 +800,10 @@ class YuiAdapter(BasePlatformAdapter):
             # A minted id has nowhere else to live, and the completion of that event has to find it.
             event._yui_turn_id = turn_id
             state.open_turn(chat_id, turn_id)
+        vocab = state.vocabulary(chat_id)
+        # ponytail: one schema per process; chats whose turns overlap can read each other's ids
+        if vocab is not None:
+            tools.declare(vocab, chat_id)
 
     async def on_processing_complete(self, event: MessageEvent, outcome: ProcessingOutcome) -> None:
         """Close the turn: a reply already rendered, anything else renders as silence."""

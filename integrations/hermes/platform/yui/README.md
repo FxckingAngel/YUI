@@ -60,8 +60,11 @@ turns in and finished replies out. The contract both sides speak is
   client is away drops them.
 - Starts a new conversation on `reset` and ends the delegations still running for that chat. The
   gateway asks to confirm `/new`, and the plugin approves it because the client already did.
-- Serves one client at a time: the `generate_express` schema is declared once per process, from
-  the vocabulary of the client that published last.
+- Declares the `generate_express` schema when a turn opens, from the vocabulary that turn's chat
+  published. The gateway holds one schema per process, and a turn reads it when its agent is built
+  and again when it compacts its context, so a turn that reaches either point after another chat's
+  turn opened runs with the other chat's ids. Each switch between chats whose vocabularies differ
+  rebuilds the gateway's cached agents.
 
 ## Install
 
