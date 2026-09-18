@@ -10,6 +10,7 @@ import type { DelegationItem } from "../chat/push-socket";
 /** How long a `done` item stays in the list after `ended_at`. */
 export const DELEGATION_DONE_TTL_MS = 30 * 60 * 1000;
 export const DELEGATION_TITLE_MAX_LEN = 120;
+export const DELEGATION_SUMMARY_MAX_LEN = 2000;
 export const DELEGATIONS_MAX_ITEMS = 50;
 
 export interface DelegationsStore {
@@ -21,7 +22,7 @@ export interface DelegationsStore {
   subscribe(cb: (items: DelegationItem[]) => void): () => void;
 }
 
-function sanitize(raw: unknown): DelegationItem | null {
+export function sanitizeDelegation(raw: unknown): DelegationItem | null {
   if (raw === null || typeof raw !== "object") return null;
   const v = raw as Record<string, unknown>;
   if (typeof v.id !== "string" || v.id === "") return null;
@@ -36,7 +37,9 @@ function sanitize(raw: unknown): DelegationItem | null {
     ...(v.state === "done" && (v.status === "ok" || v.status === "error" || v.status === "unknown")
       ? { status: v.status }
       : {}),
-    ...(v.state === "done" && typeof v.summary === "string" ? { summary: v.summary } : {}),
+    ...(v.state === "done" && typeof v.summary === "string"
+      ? { summary: v.summary.slice(0, DELEGATION_SUMMARY_MAX_LEN) }
+      : {}),
   };
 }
 
@@ -55,7 +58,7 @@ export function createDelegationsStore(deps: { now?: () => number } = {}): Deleg
   return {
     replace(next): void {
       items = (Array.isArray(next) ? next : [])
-        .map(sanitize)
+        .map(sanitizeDelegation)
         .filter((item): item is DelegationItem => item !== null)
         .slice(0, DELEGATIONS_MAX_ITEMS);
       const list = visible();
