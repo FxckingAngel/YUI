@@ -61,3 +61,12 @@ def test_a_delta_with_no_single_client_to_speak_to_reaches_the_sink_with_no_chat
     state.set_connected(CHAT, False)
     speech.on_stream_delta(delta="All green.", kind="text", turn_id=ANSWER, iteration=1, surface="yui")
     assert taken == [("", ANSWER, 1, "All green.")]
+
+
+def test_a_final_reply_with_a_removed_file_path_does_not_repeat_streamed_text():
+    stream = speech.Stream()
+    stream.begin(connected=True)
+    stream.feed(ANSWER, 1, "The report is at /tmp/yui-report.md.")
+    stream.spoke("The report is at /tmp/yui-report.md.")
+
+    assert stream.unspoken("The report is at .") == ""
