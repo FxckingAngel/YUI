@@ -171,6 +171,14 @@ describe("createQuickControls — shell", () => {
     qc.dispose();
   });
 
+  it("keeps the pop-out button as the first focus stop when onMessage is set", () => {
+    const qc = buildQc({ onMessage: vi.fn() });
+    qc.open();
+
+    expect(document.activeElement).toBe(qc.el.querySelector(".yui-iconbtn--popout"));
+    qc.dispose();
+  });
+
   it("the window variant renders no Message button", () => {
     const qc = buildQc({ variant: "window", onMessage: vi.fn() });
     expect(qc.el.querySelector(".yui-iconbtn--message")).toBeNull();
@@ -198,7 +206,7 @@ describe("createQuickControls — shell", () => {
     expect(qc.isOpen()).toBe(true);
 
     const closeBtn = qc.el.querySelector<HTMLButtonElement>(
-      ".yui-quick__bar-actions .yui-iconbtn:not(.yui-iconbtn--popout)",
+      ".yui-iconbtn--close",
     )!;
     closeBtn.click();
 
