@@ -92,11 +92,7 @@ export function createCueListSettings<C extends Cue>(cfg: CueListConfig<C>) {
       const entries = current.entries.map((cue) => {
         const previousCue = previousById.get(cue.id);
         const nextCue = nextById.get(cue.id);
-        if (
-          previousCue &&
-          nextCue &&
-          JSON.stringify(cue) === JSON.stringify(previousCue)
-        ) {
+        if (previousCue && nextCue && JSON.stringify(cue) === JSON.stringify(previousCue)) {
           changed = true;
           return structuredClone(nextCue);
         }
