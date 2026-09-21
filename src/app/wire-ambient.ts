@@ -401,7 +401,7 @@ export function wireFaller(deps: {
     const { availableMonitors } = await import("@tauri-apps/api/window");
     await deps.travelFrame.ready;
     if (disposed) return;
-    faller = createFaller({
+    const createdFaller = createFaller({
       renderer,
       getWindow: deps.travelFrame.getWindow,
       currentMotionKind: () => {
@@ -450,6 +450,9 @@ export function wireFaller(deps: {
         });
       },
     });
+    faller = createdFaller;
+    // The OS chooses the initial position; placement is not a user-controlled fall.
+    await createdFaller.drop({ place: true });
   })().catch((err) => log.warn("faller_start_failed", { degrade: true, error: String(err) }));
   return handle;
 }

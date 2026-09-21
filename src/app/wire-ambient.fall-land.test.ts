@@ -35,7 +35,7 @@ const TARGET: WindowRect = {
   windowNumber: 5,
 };
 
-async function wire(opts: { isEnabled?: () => boolean } = {}) {
+async function wire(opts: { isEnabled?: () => boolean; ready?: Promise<void> } = {}) {
   vi.stubGlobal("__TAURI_INTERNALS__", {});
   createFaller.mockClear();
   fallerDrop.mockClear();
@@ -45,7 +45,7 @@ async function wire(opts: { isEnabled?: () => boolean } = {}) {
     isEnabled: opts.isEnabled ?? (() => true),
     bus: { push: (env: { event_name: string }) => pushed.push(env) } as never,
     renderer: {} as never,
-    travelFrame: { getWindow: () => ({}) as never, ready: Promise.resolve() },
+    travelFrame: { getWindow: () => ({}) as never, ready: opts.ready ?? Promise.resolve() },
     getFallConfig: () => ({}) as never,
     getMotionKind: () => undefined,
     getFloorTolerancePx: () => 24,
@@ -54,10 +54,15 @@ async function wire(opts: { isEnabled?: () => boolean } = {}) {
     onWindowLand,
     log: noopLog,
   });
-  await vi.waitFor(() => expect(createFaller).toHaveBeenCalled());
+  if (!opts.ready) {
+    await vi.waitFor(() => expect(createFaller).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fallerDrop).toHaveBeenCalledWith({ place: true }));
+  }
   return {
-    deps: createFaller.mock.calls[0][0] as unknown as {
-      onLand(landing: { heightPx: number; surface: unknown; fell: boolean }): void;
+    get deps() {
+      return createFaller.mock.calls[0][0] as unknown as {
+        onLand(landing: { heightPx: number; surface: unknown; fell: boolean }): void;
+      };
     },
     pushed,
     onWindowLand,
@@ -73,6 +78,7 @@ describe("wireFaller — fall toggle", () => {
   it("reads the switch on every drop: on drops, off leaves her where she hangs", async () => {
     let enabled = true;
     const { handle } = await wire({ isEnabled: () => enabled });
+    fallerDrop.mockClear();
 
     handle.drop();
     expect(fallerDrop).toHaveBeenCalledTimes(1);
@@ -84,6 +90,21 @@ describe("wireFaller — fall toggle", () => {
     enabled = true;
     handle.drop();
     expect(fallerDrop).toHaveBeenCalledTimes(2);
+  });
+
+  it("places the character after the loop is built even when falling is disabled", async () => {
+    let ready!: () => void;
+    const { handle } = await wire({
+      isEnabled: () => false,
+      ready: new Promise<void>((resolve) => (ready = resolve)),
+    });
+    expect(fallerDrop).not.toHaveBeenCalled();
+
+    ready();
+    await vi.waitFor(() => expect(fallerDrop).toHaveBeenCalledWith({ place: true }));
+    fallerDrop.mockClear();
+    await handle.drop();
+    expect(fallerDrop).not.toHaveBeenCalled();
   });
 });
 
