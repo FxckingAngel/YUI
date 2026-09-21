@@ -33,6 +33,7 @@ from ..express.gate import Vocabulary
 from ..express.segments import build_segments, opening_cues, place_matched
 from ..speech import speech
 from ..turns import state
+from .frames import MAX_FRAME_BYTES, encoded, fit_frame
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +41,11 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8646
 WS_PATH = "/ws"
 SOURCE = "hermes"
-MAX_FRAME_BYTES = 262_144
 
 # The gateway marks its mid-turn sends; everything else it sends is reply text to speak.
 INTERIM_MARKERS = ("expect_edits", "_interim_send")
 # The gateway's own notices reach send() unmarked, so _send_with_retry stamps them on the way in.
 NOTICE_MARKER = "_yui_gateway_notice"
-
-# One reasoning frame per window, so a token stream does not become a frame stream.
-REASONING_WINDOW_SECONDS = 0.1
 
 CLOSE_UNAUTHORIZED = 4401
 CLOSE_REPLACED = 4409
@@ -75,54 +72,6 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
-
-
-def _encoded(frame: dict) -> tuple[str, int]:
-    body = json.dumps(frame, ensure_ascii=False)
-    return body, len(body.encode("utf-8"))
-
-
-def fit_frame(frame: dict) -> str | None:
-    """The cap is symmetric, and the client closes an oversize frame; trim one down to fit.
-
-    A frame with nothing left to trim has no body to send.
-    """
-    body, size = _encoded(frame)
-    if size <= MAX_FRAME_BYTES:
-        return body
-    # Reasoning is commentary on the reply, so it goes before any of the speech does.
-    if frame.pop("reasoning", None) is not None:
-        logger.debug("yui: reasoning dropped from an oversize %s frame", frame.get("type"))
-        body, size = _encoded(frame)
-    segments = frame.get("segments")
-    while size > MAX_FRAME_BYTES and isinstance(segments, list) and segments:
-        segments.pop()
-        body, size = _encoded(frame)
-    if size > MAX_FRAME_BYTES and isinstance(frame.get("delta"), str):
-        logger.debug("yui: reasoning delta cut to fit the frame")
-        raw = frame["delta"].encode("utf-8")
-        budget = max(len(raw) - (size - MAX_FRAME_BYTES), 0)
-        frame["delta"] = raw[:budget].decode("utf-8", "ignore")
-        body, size = _encoded(frame)
-    items = frame.get("items")
-    if size > MAX_FRAME_BYTES and isinstance(items, list):
-        # Oldest first; the summary is the least of what a row shows.
-        for item in items:
-            if not isinstance(item, dict) or item.pop("summary", None) is None:
-                continue
-            body, size = _encoded(frame)
-            if size <= MAX_FRAME_BYTES:
-                break
-    if size > MAX_FRAME_BYTES:
-        logger.warning(
-            "yui: %s frame still over %d bytes at %d after trimming",
-            frame.get("type"),
-            MAX_FRAME_BYTES,
-            size,
-        )
-        return None
-    logger.warning("yui: %s frame over %d bytes, trimmed to fit", frame.get("type"), MAX_FRAME_BYTES)
-    return body
 
 
 def _message_id() -> str:
@@ -159,8 +108,7 @@ class YuiAdapter(BasePlatformAdapter):
         self._closings: set[asyncio.Task] = set()
         self._site: web.TCPSite | None = None
         self._homed: set[str] = set()
-        self._reasoning_pending: dict[str, list[str]] = {}
-        self._reasoning_flushes: dict[str, asyncio.Task] = {}
+        self._reasoning = reasoning.Coalescer(self._send_reasoning)
         self._streams: dict[str, speech.Stream] = {}
         self._sends: set[asyncio.Task] = set()
 
@@ -216,18 +164,12 @@ class YuiAdapter(BasePlatformAdapter):
         reasoning.set_sink(None)
         speech.set_sink(None)
         tool_status.set_sink(None)
-        for task in (
-            *self._reasoning_flushes.values(),
-            *self._closings,
-            *self._confirmations,
-            *self._sends,
-        ):
+        for task in (*self._closings, *self._confirmations, *self._sends):
             task.cancel()
-        self._reasoning_flushes.clear()
+        self._reasoning.close()
         self._closings.clear()
         self._confirmations.clear()
         self._sends.clear()
-        self._reasoning_pending.clear()
         for chat_id, ws in list(self._sockets.items()):
             state.set_connected(chat_id, False)
             with contextlib.suppress(Exception):
@@ -547,41 +489,13 @@ class YuiAdapter(BasePlatformAdapter):
         if loop is None or not state.is_connected(chat_id):
             return
         with contextlib.suppress(RuntimeError):
-            loop.call_soon_threadsafe(self._collect_reasoning, chat_id, delta)
+            loop.call_soon_threadsafe(self._reasoning.collect, chat_id, delta)
 
-    def _collect_reasoning(self, chat_id: str, delta: str) -> None:
-        self._reasoning_pending.setdefault(chat_id, []).append(delta)
-        self._arm_reasoning_flush(chat_id)
-
-    def _arm_reasoning_flush(self, chat_id: str) -> None:
-        if chat_id not in self._reasoning_flushes:
-            self._reasoning_flushes[chat_id] = asyncio.create_task(self._flush_reasoning(chat_id))
-
-    def _forget_reasoning(self, chat_id: str) -> None:
-        """A new turn thinks from nothing, so the last one's tail is not its opening words."""
-        # Pending goes first: a cancelled flush re-arms from its finally only when pending is non-empty.
-        self._reasoning_pending.pop(chat_id, None)
-        flush = self._reasoning_flushes.pop(chat_id, None)
-        if flush is not None:
-            flush.cancel()
-
-    async def _flush_reasoning(self, chat_id: str) -> None:
-        """What arrived during the window leaves as one frame; the client shows thinking, not text."""
-        try:
-            await asyncio.sleep(REASONING_WINDOW_SECONDS)
-            delta = "".join(self._reasoning_pending.pop(chat_id, []))
-            # A delta whose turn closed inside the window names no turn; the client could not place it.
-            turn = state.turn_id(chat_id)
-            if delta and turn is not None:
-                await self._send_frame(chat_id, {"type": "reasoning", "turn_id": turn, "delta": delta})
-        finally:
-            # No running loop only when the coroutine is collected after loop teardown.
-            with contextlib.suppress(RuntimeError):
-                if self._reasoning_flushes.get(chat_id) is asyncio.current_task():
-                    self._reasoning_flushes.pop(chat_id, None)
-                # A delta that arrived during the send found this flush still armed and scheduled none.
-                if self._reasoning_pending.get(chat_id):
-                    self._arm_reasoning_flush(chat_id)
+    async def _send_reasoning(self, chat_id: str, delta: str) -> None:
+        # A delta whose turn closed inside the window names no turn; the client could not place it.
+        turn = state.turn_id(chat_id)
+        if turn is not None:
+            await self._send_frame(chat_id, {"type": "reasoning", "turn_id": turn, "delta": delta})
 
     # -- speech -------------------------------------------------------------------------------
 
@@ -652,7 +566,7 @@ class YuiAdapter(BasePlatformAdapter):
         # A speech frame is never held, and trimming it would drop its only sentence.
         if (
             not state.is_connected(chat_id)
-            or _encoded(frame)[1] > MAX_FRAME_BYTES
+            or encoded(frame)[1] > MAX_FRAME_BYTES
             or not await self._send_frame(chat_id, frame)
         ):
             stream.off = True
@@ -878,7 +792,7 @@ class YuiAdapter(BasePlatformAdapter):
             state.reset(chat_id)
             stream.begin(connected=state.is_connected(chat_id))
             reasoning.clear(chat_id)
-            self._forget_reasoning(chat_id)
+            self._reasoning.forget(chat_id)
             internal = getattr(event, "internal", False)
             message_id = getattr(event, "message_id", "") or ""
             # Hooks of its own make this a turn, so it ends on its own and not with the one it joined.
