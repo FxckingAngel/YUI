@@ -145,6 +145,10 @@ class Stream:
         for spoken in (self.sent, self.sent[self.source_start :]):
             if whole.startswith(spoken) and (spoken or (written and whole.startswith(written))):
                 return _past(content, len(spoken))
+        for spoken in (self.sent, self.sent[self.source_start :]):
+            rest = _rewritten_rest(content, whole, spoken)
+            if rest is not None:
+                return rest
         return None
 
 
@@ -158,3 +162,22 @@ def _past(content: str, count: int) -> str:
             if not count:
                 return content[index + 1 :]
     return ""
+
+
+def _rewritten_rest(content: str, whole: str, spoken: str) -> str | None:
+    """Find the unsent tail when the gateway removed text from an already spoken reply."""
+    if not spoken or whole.startswith(spoken):
+        return None
+    source_index = 0
+    matched = 0
+    skipped = False
+    for char in whole:
+        found = spoken.find(char, source_index)
+        if found < 0:
+            break
+        skipped = skipped or found > source_index
+        source_index = found + 1
+        matched += 1
+    if matched < 8 or not skipped:
+        return None
+    return _past(content, matched)
