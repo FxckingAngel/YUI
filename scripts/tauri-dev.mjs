@@ -2,12 +2,24 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 import { buildDevUrl, findFreePort, resolvePort, tauriConfigArg } from "./dev-port.mjs";
+import { packageManagerCommand } from "./process-command.mjs";
 
 const port = await resolvePort({ env: process.env, isPortFree: findFreePort });
 console.log(`[YUI] tauri dev → ${buildDevUrl(port)} (YUI_DEV_PORT=${port})`);
-const child = spawn("pnpm", ["exec", "tauri", "dev", "--config", tauriConfigArg(port)], {
+const configArg =
+  process.platform === "win32"
+    ? `"${tauriConfigArg(port).replaceAll('"', '\\"')}"`
+    : tauriConfigArg(port);
+const args = ["exec", "tauri", "dev", "--config", configArg];
+const command = process.platform === "win32" ? "cmd.exe" : packageManagerCommand();
+const commandArgs =
+  process.platform === "win32"
+    ? ["/d", "/s", "/c", `${packageManagerCommand()} ${args.join(" ")}`]
+    : args;
+const child = spawn(command, commandArgs, {
   stdio: "inherit",
   detached: true,
+  windowsVerbatimArguments: process.platform === "win32",
   env: { ...process.env, YUI_DEV_PORT: String(port) },
 });
 // detached → signal the whole process group so grandchild vite is reaped too, not just pnpm.
