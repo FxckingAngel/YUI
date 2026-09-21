@@ -132,6 +132,7 @@ YUI/
         turn-output.ts               # Speech lifecycle port between the backend caller and the voice pipeline
         push-turn.ts                 # Push-turn ids the user stopped, so their late frames drop whole, and the wait for a sent turn to finish
         render-turn.ts               # Plays a finished backend turn that arrived as a render frame on the push socket
+        turn-feed.ts                 # Shared tool-status and reasoning consumer for every transport
       backend/
         backend-caller.ts            # Sends a tier-2 or tier-3 event to backend judgment and streams the reply
         push-call.ts                 # Push transport path of a turn: frame send and the wait for its turn_end
@@ -237,6 +238,7 @@ YUI/
         tauri-listen.ts                # Shared os_event channel payload shape and listen resolver
         tauri-env.ts                   # Tauri runtime detection
         frontmost-tracker.ts           # Latest frontmost-window sample off the os_event channel
+        own-origin-fetch.ts             # Keeps each webview's own origin on native fetch instead of the CORS proxy
         capture/                       # Screen enumeration and screenshot capture
           tauri-screen.ts              # Tauri-backed screen enumeration and capture
           screen-source-provider.ts    # Monitor enumeration seam
