@@ -337,16 +337,7 @@ ${RATE_LIMIT_FIELDS.map((f) =>
         <i></i><i></i><i></i><i></i><i></i><i></i>
       </span>
       <span class="yui-quick__title" title="${t("panel.drag_hint")}">${t("panel.title")}</span>
-      <span class="yui-quick__bar-actions">${
-        showMessage
-          ? `
-        <button class="yui-iconbtn yui-iconbtn--message" type="button" aria-label="${t("panel.message")}" data-tip="${t("panel.message")}">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M5 6h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>`
-          : ""
-      }
+      <span class="yui-quick__bar-actions">
         <button class="yui-iconbtn yui-iconbtn--popout" type="button" aria-label="${t("panel.pop_out")}" data-tip="${t("panel.pop_out")}">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M14 5h5v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -354,6 +345,16 @@ ${RATE_LIMIT_FIELDS.map((f) =>
             <path d="M18 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
+        ${
+          showMessage
+            ? `
+        <button class="yui-iconbtn yui-iconbtn--message" type="button" aria-label="${t("panel.message")}" data-tip="${t("panel.message")}">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 6h14a1 1 0 0 1 1 1v9a1 1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>`
+            : ""
+        }
         <button class="yui-iconbtn yui-iconbtn--close" type="button" aria-label="${t("panel.close")}" data-tip="${t("panel.close")}">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>

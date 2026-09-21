@@ -152,7 +152,7 @@ interface QuickControlsOptions {
   /** Reset the camera viewpoint (orbit angles) to head-on. Renders the section when set. */
   onResetViewpoint?: () => void;
   onPopOut?: () => void;
-  /** Opens the message bar. Renders the header Message button (popover variant) when set. */
+  /** Opens the text input. Renders the header button when set. */
   onMessage?: () => void;
   onOpenDevtools?: () => void;
   variant?: "popover" | "window";
@@ -351,7 +351,7 @@ export function createQuickControls({
     showPacerGap: !!pacerGapSettings,
     showRateLimits: !!rateLimitSettings,
     showDevtools: !isWindow && !!onOpenDevtools,
-    showMessage: !isWindow && !!onMessage,
+    showMessage: !!onMessage,
     showHistory: !!transcript,
     railCollapsed: railCollapsedSettings?.get().enabled ?? false,
     closedSections: new Set(sectionsSettings?.get().closed ?? []),
@@ -714,7 +714,7 @@ export function createQuickControls({
     onPopOut?.();
   }
 
-  // Close first: the panel restores focus on close, and the message bar must take it after.
+  // Close first: the panel restores focus on close, and the text input must take it after.
   function handleMessage(): void {
     popover.close();
     onMessage?.();
