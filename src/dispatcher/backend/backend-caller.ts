@@ -31,6 +31,7 @@ import type {
   ToolStatus,
   Usage,
 } from "../../contract";
+import type { ReasoningStore } from "../../io/bridge/reasoning-store";
 import { type ChatRequest, streamChat } from "../../io/chat/chat-client";
 import { buildCCMessages } from "../../io/chat/chat-completions";
 import { selectSendSuffix } from "../../io/chat/chat-history-store";
@@ -103,6 +104,8 @@ interface BackendCallerDeps extends PushCallDeps {
   getPrevious?: () => PreviousTurn | undefined;
   /** tool_status sink — called only when present. */
   onToolStatus?: (status: ToolStatus) => void;
+  /** The reasoning chip's store — the streaming path's reasoning deltas land here. */
+  reasoning?: Pick<ReasoningStore, "append" | "finish" | "interrupt">;
   /** Previous response id lookup — when present, included in request to continue conversation. Called per turn (reflects reset/rotation). */
   getPreviousResponseId?: () => string | undefined;
   /** New response id persist — called only after a completely successful turn (conversation state progress). */
@@ -162,6 +165,8 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
     let thinkingDone = false;
     // Whether running tool_status was passed and not yet closed with done — cleanup decision in finally.
     let toolRunning = false;
+    // Whether this call opened a reasoning cycle — the finally tears down only its own.
+    let reasoningLive = false;
     const startThinking = () => {
       if (thinkingStarted || thinkingDone) return;
       thinkingStarted = true;
@@ -297,6 +302,10 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
         streamedAny = false;
         cueStreamed = false;
         silenceFilter = createSilenceTokenFilter();
+        if (reasoningLive) {
+          deps.reasoning?.interrupt();
+          reasoningLive = false;
+        }
         let streamError: string | undefined;
         // HTTP status carried by stream error event (openai SDK APIError.status) — distinguish
         // 401/403 as http_4xx_drop (auth-ish) instead of network_drop.
@@ -349,9 +358,15 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
                 deps.turnOutput?.toolStatus(turn.id, ev.status.state, ev.status.tool_id);
                 toolRunning = ev.status.state === "running";
                 break;
+              case "reasoning":
+                deps.reasoning?.append(ev.delta);
+                reasoningLive = true;
+                break;
               case "completed":
                 envelope = ev.envelope;
                 newResponseId = ev.responseId || undefined;
+                deps.reasoning?.finish(undefined);
+                reasoningLive = false;
                 break;
               case "error":
                 streamError = ev.message;
@@ -553,6 +568,8 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
       return "ok";
     } finally {
       endThinking();
+      // Only a cycle this call opened and never completed dies with it; the push socket owns its own.
+      if (!isPush && reasoningLive) deps.reasoning?.interrupt();
       // Prevent running chip from surviving without done — on all exit paths including dead turns
       // (abort·drop·stall), flow one idle so consumer brings chip down.
       if (toolRunning) deps.onToolStatus?.({ state: "idle" });
