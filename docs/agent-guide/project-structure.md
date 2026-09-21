@@ -58,6 +58,7 @@ YUI/
         wire-window-sync.ts          # Settings broadcast, guardrail overrides, and the shared cross-window sync core
       settings/                      # Selections applied to the running app
         wire-avatar.ts               # VRM and speaker selection stores, their swap and import flows, and the avatar config applied at boot
+        wire-cue-locale-sync.ts      # Reseeds untouched built-in cues when the display language changes
     logger.ts                        # Namespaced frontend logger with a runtime level
     tauri-env.ts                     # Tauri runtime detection
     settings-main.ts                 # Settings-window entry

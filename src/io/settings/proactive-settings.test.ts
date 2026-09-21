@@ -13,6 +13,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createProactiveSettings,
+  defaultSettings,
   type ProactiveSettings,
   type ProactiveStorage,
 } from "./proactive-settings";
@@ -192,6 +193,15 @@ describe("createProactiveSettings — locale", () => {
     store.syncLocale("ko", "en");
     expect(store.get().entries[0].label).toBe("Quick break");
     expect(store.get().entries[0].context).toContain("fresh air");
+  });
+
+  it("reseeds entries loaded from storage", () => {
+    const store = createProactiveSettings({
+      storage: fakeStorage(JSON.parse(JSON.stringify(defaultSettings("ko")))),
+      locale: "ko",
+    });
+    store.syncLocale("ko", "en");
+    expect(store.get().entries[0].label).toBe("Quick break");
   });
 
   it("keeps edited entries when the locale changes", () => {

@@ -94,9 +94,7 @@ async function bootstrap(): Promise<void> {
   };
   let shell = buildShell();
   let localeRebuild = Promise.resolve();
-  const unsubscribeLocale = subscribeLocale((locale, previousLocale) => {
-    settingsStores.proactiveSettings.syncLocale(previousLocale, locale);
-    settingsStores.scheduleSettings.syncLocale(previousLocale, locale);
+  const unsubscribeLocale = subscribeLocale(() => {
     localeRebuild = localeRebuild
       .then(async () => {
         const focus = captureFocus(mount);
