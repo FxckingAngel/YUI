@@ -54,7 +54,10 @@ async function wire(opts: { isEnabled?: () => boolean; ready?: Promise<void> } =
     onWindowLand,
     log: noopLog,
   });
-  if (!opts.ready) await vi.waitFor(() => expect(createFaller).toHaveBeenCalled());
+  if (!opts.ready) {
+    await vi.waitFor(() => expect(createFaller).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fallerDrop).toHaveBeenCalledWith({ place: true }));
+  }
   return {
     get deps() {
       return createFaller.mock.calls[0][0] as unknown as {
@@ -75,6 +78,7 @@ describe("wireFaller — fall toggle", () => {
   it("reads the switch on every drop: on drops, off leaves her where she hangs", async () => {
     let enabled = true;
     const { handle } = await wire({ isEnabled: () => enabled });
+    fallerDrop.mockClear();
 
     handle.drop();
     expect(fallerDrop).toHaveBeenCalledTimes(1);
@@ -88,16 +92,19 @@ describe("wireFaller — fall toggle", () => {
     expect(fallerDrop).toHaveBeenCalledTimes(2);
   });
 
-  it("holds a drop asked for before the loop is built and runs it once it is", async () => {
+  it("places the character after the loop is built even when falling is disabled", async () => {
     let ready!: () => void;
-    const { handle } = await wire({ ready: new Promise<void>((resolve) => (ready = resolve)) });
-
-    const pending = handle.drop({ place: true });
+    const { handle } = await wire({
+      isEnabled: () => false,
+      ready: new Promise<void>((resolve) => (ready = resolve)),
+    });
     expect(fallerDrop).not.toHaveBeenCalled();
 
     ready();
-    await pending;
-    expect(fallerDrop).toHaveBeenCalledWith({ place: true });
+    await vi.waitFor(() => expect(fallerDrop).toHaveBeenCalledWith({ place: true }));
+    fallerDrop.mockClear();
+    await handle.drop();
+    expect(fallerDrop).not.toHaveBeenCalled();
   });
 });
 
