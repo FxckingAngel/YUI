@@ -47,18 +47,20 @@ turns in and finished replies out. The contract both sides speak is
   connects while a turn runs, gets the rest of that turn in its `render`. The same holds for a turn
   whose text streams while no single client is connected, while the reset acknowledgement is still
   unspoken, or after a `speech` frame fails to send.
-- Names the most recently opened turn in every reply of a run, and clears the name when the turn
-  ends. A turn the gateway runs inside a turn it interrupted ends first, and the interrupted turn
-  ends behind it. A turn whose text the gateway takes into a turn already running on the same chat
-  ends when that turn ends. A turn the gateway started on its own, such as a cron result, carries an
+- Names the most recently arrived turn — open or joined — in every reply of a run, and clears the
+  name when the turn ends. A turn the gateway runs inside a turn it interrupted ends first, and the
+  interrupted turn ends behind it. A turn whose text the gateway takes into a turn already running
+  on the same chat ends when that turn ends, and every frame the plugin sends after that turn
+  arrives names its id. A turn the gateway started on its own, such as a cron result, carries an
   id the plugin mints, of the form `hermes-<n>`, counted per gateway process.
 - Sends a `delegations` frame whenever background work starts or finishes, so the client can show
   what is running; each finished item carries its `status` and `summary`. The plugin holds fifty
   items per chat, dropping the oldest finished one past that, and drops summaries oldest-first
-  from a frame over the size limit.
+  from a frame over the size limit. The platform hint tells the agent to hand long independent
+  work to a background delegation when a delegation tool is available.
 - Sends a `tool_status` frame from the gateway's `pre_tool_call` and `post_tool_call` hooks for
-  each tool call of an open YUI turn, so the client can show and name the tool in use. A frame for
-  a chat with no connected client or no open turn is dropped, never held and never retried.
+  each tool call of a YUI turn, so the client can show and name the tool in use. A frame for a chat
+  with no connected client or no turn held, open or joined, is dropped, never held and never retried.
   `generate_express` sends none, and neither does a tool call a delegated child makes.
 - Holds reports that arrive while the client is away, up to forty, and delivers them as one
   summary turn when it connects again. A reply that finishes while the client is away is held the
@@ -66,6 +68,16 @@ turns in and finished replies out. The contract both sides speak is
   client is away drops them.
 - Starts a new conversation on `reset` and ends the delegations still running for that chat. The
   gateway asks to confirm `/new`, and the plugin approves it because the client already did.
+- Stops the session's running agent on `stop`, which the client sends when the user presses stop.
+  The frame carries the turn ids the client just stopped, and the plugin hands the gateway `/stop`
+  only when at least one of them is still open on the chat and every open turn is named. A `stop`
+  that arrives while a turn the frame does not name is open — one the gateway started on its own
+  that the client has not seen a `render` of, or one that began after the client stopped — does
+  nothing, and neither turn ends. A turn the gateway folded into the running one is not open on
+  its own and ends with it. The acknowledgement `/stop` makes is never spoken, and each
+  turn the cancellation closes ends with one `turn_end`. The gateway's `/stop` interrupts the
+  running turn only: a delegation runs in the background apart from the turn that started it, so
+  it keeps running and reports when it finishes.
 - Declares the `generate_express` schema when a turn opens, from the vocabulary that turn's chat
   published. The gateway holds one schema per process, and a turn reads it when its agent is built
   and again when it compacts its context, so a turn that reaches either point after another chat's

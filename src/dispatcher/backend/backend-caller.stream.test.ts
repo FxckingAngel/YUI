@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { ControlEnvelope, ExpressArgs, ToolStatus, Usage } from "../../contract";
+import { createReasoningStore } from "../../io/bridge/reasoning-store";
 import type { Logger } from "../../logger";
 import {
   CONFIG,
@@ -20,6 +21,7 @@ import {
   makeLogger,
   makeTurnOutput,
   peekEnv,
+  reasoningEvent,
   toolStatusEvent,
   touchEnv,
   turnOf,
@@ -27,6 +29,7 @@ import {
   userEnv,
   windowSitEnv,
 } from "../test-helpers";
+import { createTurnFeed } from "../turn/turn-feed";
 import { type BackendCaller, createBackendCaller } from "./backend-caller";
 
 const script = createScriptedStream();
@@ -35,6 +38,7 @@ let turnOutput: ReturnType<typeof makeTurnOutput>;
 let toolStatusSink: Mock<(status: ToolStatus) => void>;
 let usageSink: Mock<(usage: Usage) => void>;
 let spokeTextSink: Mock<(spoke: boolean) => void>;
+let reasoning: Record<"append" | "finish" | "interrupt", Mock>;
 let caller: BackendCaller;
 let logger: Logger;
 
@@ -45,6 +49,7 @@ beforeEach(() => {
   toolStatusSink = vi.fn();
   usageSink = vi.fn();
   spokeTextSink = vi.fn();
+  reasoning = { append: vi.fn(), finish: vi.fn(), interrupt: vi.fn() };
   logger = makeLogger();
   caller = createBackendCaller({
     config: CONFIG,
@@ -53,7 +58,7 @@ beforeEach(() => {
     getFetch: async () => undefined,
     stream: script.stream,
     turnOutput,
-    onToolStatus: toolStatusSink,
+    turnFeed: createTurnFeed({ onToolStatus: toolStatusSink, reasoning }),
     onUsage: usageSink,
     reportSpokeText: spokeTextSink,
     logger,
@@ -403,6 +408,21 @@ describe("backend_caller — per-beat cue application (pipeline ownership)", () 
     expect(applyDirective).toHaveBeenCalledWith(env);
   });
 
+  it("silent turn whose envelope carries neither channel → no applyDirective (the body keeps its motion)", async () => {
+    script.events = [deltaEvent("[SILENT]"), completedEvent({ speech_text: "[SILENT]" })];
+    const res = await caller.call(turnOf(userEnv()));
+    expect(res).toBe("ok");
+    expect(applyDirective).not.toHaveBeenCalled();
+  });
+
+  it("silent turn whose envelope carries an explicit motion: null → applyDirective at completed", async () => {
+    const env: ControlEnvelope = { speech_text: "", motion: null };
+    script.events = [completedEvent(env)];
+    const res = await caller.call(turnOf(userEnv()));
+    expect(res).toBe("ok");
+    expect(applyDirective).toHaveBeenCalledWith(env);
+  });
+
   it("completed-only backend (no express) with emotion/motion → applyDirective called at completed", async () => {
     const env: ControlEnvelope = {
       speech_text: "안녕",
@@ -500,6 +520,81 @@ describe("backend_caller — usage sink (token accounting channel)", () => {
     script.events = [usageEvent(1, 2, 3), completedEvent({ speech_text: "hi" })];
     const res = await caller.call(turnOf(userEnv()));
     expect(res).toBe("ok");
+  });
+});
+
+// ── reasoning chip feed (streaming path) ────────────────────────────────────────
+
+describe("backend_caller — reasoning store feed", () => {
+  it("each reasoning event → store.append in order; completed → finish(undefined)", async () => {
+    script.events = [
+      reasoningEvent("weighing"),
+      reasoningEvent(" the odds"),
+      completedEvent({ speech_text: "so" }),
+    ];
+    const res = await caller.call(turnOf(userEnv()));
+    expect(res).toBe("ok");
+    expect(reasoning.append.mock.calls.map((c) => c[0])).toEqual(["weighing", " the odds"]);
+    expect(reasoning.finish).toHaveBeenCalledWith(undefined);
+  });
+
+  it("a stream error event → interrupt once, never finish", async () => {
+    script.events = [reasoningEvent("weighing"), { type: "error", message: "boom" }];
+    const res = await caller.call(turnOf(userEnv()));
+    expect(res).toBe("network_drop");
+    expect(reasoning.interrupt).toHaveBeenCalledTimes(1);
+    expect(reasoning.finish).not.toHaveBeenCalled();
+  });
+
+  it("an external abort mid-stream → interrupt once, never finish", async () => {
+    const ac = new AbortController();
+    reasoning.append.mockImplementation(() => ac.abort());
+    script.events = [reasoningEvent("weighing"), reasoningEvent(" more")];
+    const res = await caller.call(turnOf(userEnv()), ac.signal);
+    expect(res).toBe("superseded_by_user");
+    expect(reasoning.interrupt).toHaveBeenCalledTimes(1);
+    expect(reasoning.finish).not.toHaveBeenCalled();
+  });
+
+  it("a completed turn that streamed no reasoning never calls interrupt", async () => {
+    script.events = [completedEvent({ speech_text: "so" })];
+    const res = await caller.call(turnOf(userEnv()));
+    expect(res).toBe("ok");
+    expect(reasoning.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("a turn whose reasoning completed normally never calls interrupt after the finish", async () => {
+    script.events = [
+      reasoningEvent("weighing"),
+      reasoningEvent(" the odds"),
+      completedEvent({ speech_text: "so" }),
+    ];
+    const res = await caller.call(turnOf(userEnv()));
+    expect(res).toBe("ok");
+    expect(reasoning.finish).toHaveBeenCalledTimes(1);
+    expect(reasoning.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("leaves the real store holding the joined text, finished", async () => {
+    const store = createReasoningStore();
+    caller = createBackendCaller({
+      config: CONFIG,
+      renderer: { applyDirective } as never,
+      getApiKey: async () => "k",
+      getFetch: async () => undefined,
+      stream: script.stream,
+      turnOutput,
+      turnFeed: createTurnFeed({ onToolStatus: () => {}, reasoning: store }),
+      logger,
+    });
+    script.events = [
+      reasoningEvent("weighing"),
+      reasoningEvent(" the odds"),
+      completedEvent({ speech_text: "so" }),
+    ];
+    const res = await caller.call(turnOf(userEnv()));
+    expect(res).toBe("ok");
+    expect(store.get()).toEqual({ text: "weighing the odds", live: false });
   });
 });
 
@@ -736,7 +831,7 @@ describe("backend_caller — 404 chain-break retry does not leak attempt-1 envel
       getFetch: async () => undefined,
       stream: script.stream,
       turnOutput,
-      onToolStatus: toolStatusSink,
+      turnFeed: createTurnFeed({ onToolStatus: toolStatusSink, reasoning: createReasoningStore() }),
       onUsage: usageSink,
       getPreviousResponseId,
       onResponseId,
@@ -760,6 +855,45 @@ describe("backend_caller — 404 chain-break retry does not leak attempt-1 envel
     expect(res).toBe("parse_error");
     expect(applyDirective).not.toHaveBeenCalled();
     expect(onResponseId).not.toHaveBeenCalled();
+  });
+
+  it("interrupts attempt 1's reasoning cycle before the retry, so its text does not join attempt 2's", async () => {
+    const onResponseId = vi.fn();
+    const onResponseIdInvalid = vi.fn();
+    const onChainReset = vi.fn();
+    let stored: string | undefined = "resp_dead";
+    const getPreviousResponseId = vi.fn(() => stored);
+    onResponseIdInvalid.mockImplementation(() => {
+      stored = undefined;
+    });
+    const store = createReasoningStore();
+
+    caller = createBackendCaller({
+      config: CONFIG,
+      renderer: { applyDirective } as never,
+      getApiKey: async () => "k",
+      getFetch: async () => undefined,
+      stream: script.stream,
+      turnOutput,
+      turnFeed: createTurnFeed({ onToolStatus: () => {}, reasoning: store }),
+      getPreviousResponseId,
+      onResponseId,
+      onResponseIdInvalid,
+      onChainReset,
+      logger,
+    });
+
+    // Attempt 1 streams reasoning, then dies on the 404 chain-break; attempt 2 is the retry.
+    script.events = [
+      reasoningEvent("stale "),
+      { type: "error", message: "Previous response not found: resp_dead", status: 404 },
+    ];
+    script.eventsRetry = [reasoningEvent("fresh"), completedEvent({ speech_text: "ok" })];
+
+    const res = await caller.call(turnOf(userEnv()));
+
+    expect(res).toBe("ok");
+    expect(store.get()).toEqual({ text: "fresh", live: false });
   });
 });
 

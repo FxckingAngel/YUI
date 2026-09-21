@@ -23,6 +23,7 @@ import { createDispatcher, type Dispatcher } from "../dispatcher/dispatcher";
 import type { UserInputSource } from "../dispatcher/sources/user-input-source";
 import { createPushTurns } from "../dispatcher/turn/push-turn";
 import { createTurnLog } from "../dispatcher/turn/turn";
+import { createTurnFeed } from "../dispatcher/turn/turn-feed";
 import type { DelegationHistory } from "../io/bridge/delegation-history";
 import type { DelegationsStore } from "../io/bridge/delegations-store";
 import type { ReasoningStore } from "../io/bridge/reasoning-store";
@@ -68,7 +69,7 @@ import {
   wireWalker,
 } from "./wire-ambient";
 import type { wireSpeakerSelection, wireVrmSelection } from "./wire-avatar";
-import { wirePushTransport } from "./wire-push";
+import { wirePushTransport, wireStopButton } from "./wire-push";
 import { wireDispatcherSources, wireWindowSources } from "./wire-sources";
 import { wirePeekExitTriggers, wireSummonHotkey } from "./wire-summon";
 import { wireBroker, wireVoiceInput } from "./wire-voice";
@@ -111,7 +112,7 @@ interface Phase1Handles {
   delegations: DelegationsStore;
   /** The persisted history every `delegations` frame folds into. */
   delegationHistory: DelegationHistory;
-  /** The backend's reasoning text, fed by the push socket's `reasoning` frames. */
+  /** The backend's reasoning text, fed by the push socket's reasoning frames and the streaming path. */
   reasoning: ReasoningStore;
   getEndpoints(): EndpointsConfig;
   /** Effective guardrails — the editable caps layered on configs/guardrails.json. */
@@ -315,6 +316,9 @@ const realFactories: ConfiguredBootstrapFactories = {
       else if (status.state === "done") surfaces.finishTool();
       else surfaces.hideTool();
     };
+    // One feed for both transports, so a transport's frames never reach the chip or the
+    // reasoning store without an owner naming the turn they belong to.
+    const turnFeed = createTurnFeed({ onToolStatus: applyToolStatus, reasoning });
 
     const backendCaller = createBackendCaller({
       get config() {
@@ -336,7 +340,7 @@ const realFactories: ConfiguredBootstrapFactories = {
       },
       turnOutput: voice.turnOutput,
       reportSpokeText: (spoke) => turnLog.setSpokeText(spoke),
-      onToolStatus: applyToolStatus,
+      turnFeed,
       getScreenshot: async () => {
         const screenshot = settings.screenshotSettings.get();
         if (!screenshot.enabled) return undefined;
@@ -762,8 +766,7 @@ const realFactories: ConfiguredBootstrapFactories = {
           pushTurns,
           delegations,
           delegationHistory,
-          reasoning,
-          onToolStatus: applyToolStatus,
+          turnFeed,
           appendTurnRecord: (record) => appendRecord(record),
           appendTranscript: (entry) => chatHistoryStore.append(entry),
           log,
@@ -772,12 +775,13 @@ const realFactories: ConfiguredBootstrapFactories = {
     }
     ensureActive();
     // The stop button and the panel's session reset share this path; cancel() alone leaves queued speech playing.
-    const stopTurn = (): void => {
+    const stopTurn = (): string[] => {
       dispatcher.cancel();
-      pushTurns.cut();
+      const cut = pushTurns.cut();
       voice.speechPlayback.interrupt();
+      return cut;
     };
-    surfaces.onStop(stopTurn);
+    wireStopButton({ onStop: (cb) => surfaces.onStop(cb), stopTurn, socket: pushSocket, log });
     surfaces.onSubmit((text, images) => {
       userInput.submit(text, images);
       proactiveSource.noteInteraction();
