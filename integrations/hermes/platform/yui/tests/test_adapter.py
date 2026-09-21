@@ -819,20 +819,48 @@ async def test_a_follow_up_completed_inside_an_open_turn_waits_for_the_outer_one
     assert (await recv(ws))["type"] == "delegations"
 
 
-async def test_a_turn_the_gateway_takes_into_the_running_one_ends_with_it(client, adapter):
-    """Steered or redirected into the running turn, it never gets hooks of its own."""
+async def test_a_turn_the_gateway_takes_into_the_running_one_names_the_newest_turn(client, adapter):
+    """Steered or redirected into the running turn, it never gets hooks of its own, and every
+    frame the plugin sends after it arrives names it; both turns still end behind the run."""
     ws = await ready(client)
     running = user_turn(adapter, "777")
     await adapter.on_processing_start(running)
     adapter._active_sessions[adapter._event_session_key(running)] = object()
     await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
     await wait_for(lambda: adapter.dispatched)
+    await adapter.send(CHAT, "About the docs.", metadata={"notify": True})
+    assert await recv(ws) == {
+        "type": "render",
+        "turn_id": "778",
+        "source": "hermes",
+        "segments": [{"cues": [], "speech": "About the docs."}],
+    }
     await adapter.on_processing_complete(running, ProcessingOutcome.SUCCESS)
     assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
     assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
     # The next frame proves the two ends were all the pair sent.
     adapter.notify_delegations(CHAT)
     assert (await recv(ws))["type"] == "delegations"
+
+
+async def test_a_cue_only_render_after_a_turn_joined_names_the_joined_turn(client, adapter):
+    """Cues left at completion ride the newest turn the chat holds, not the one that opened first."""
+    ws = await ready(client)
+    running = user_turn(adapter, "777")
+    await adapter.on_processing_start(running)
+    adapter._active_sessions[adapter._event_session_key(running)] = object()
+    await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
+    await wait_for(lambda: adapter.dispatched)
+    state.append_cue(CHAT, {"emotion_id": "happy"}, "")
+    await adapter.on_processing_complete(running, ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {
+        "type": "render",
+        "turn_id": "778",
+        "source": "hermes",
+        "segments": [{"cues": [{"emotion_id": "happy"}], "speech": ""}],
+    }
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
 
 
 async def test_a_turn_the_gateway_gives_hooks_of_its_own_keeps_its_id(client, adapter):
@@ -941,7 +969,12 @@ async def test_a_turn_joined_to_a_failed_one_ends_behind_its_failure_line(client
     await wait_for(lambda: adapter.dispatched)
     await adapter.on_processing_complete(failed, ProcessingOutcome.FAILURE)
     await adapter.send(CHAT, "Sorry, that one broke.", metadata={"notify": True})
-    assert (await recv(ws))["type"] == "render"
+    assert await recv(ws) == {
+        "type": "render",
+        "turn_id": "778",
+        "source": "hermes",
+        "segments": [{"cues": [], "speech": "Sorry, that one broke."}],
+    }
     assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
     assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
 
@@ -1379,8 +1412,24 @@ async def test_a_tool_call_reaches_the_client_as_tool_status_frames(client, adap
     }
 
 
-async def test_a_tool_call_on_a_chat_with_no_open_turn_sends_no_frame(client, adapter):
-    """A call on a chat with no open turn is not a YUI turn's; the fence proves none was sent."""
+async def test_a_tool_call_after_a_turn_joined_names_the_joined_turn(client, adapter):
+    """The joined turn is the newest the chat holds, so its id names the frame."""
+    ws = await ready(client)
+    STUB_ENV["HERMES_SESSION_CHAT_ID"] = CHAT
+    tool_status.set_sink(adapter.push_tool_status)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    state.mark_joined(CHAT, "778")
+    await asyncio.to_thread(tool_status.on_pre_tool_call, tool_name="read_file", task_id="s", session_id="s")
+    assert await recv(ws) == {
+        "type": "tool_status",
+        "turn_id": "778",
+        "state": "running",
+        "tool_id": "read_file",
+    }
+
+
+async def test_a_tool_call_on_a_chat_with_no_turn_held_sends_no_frame(client, adapter):
+    """A call on a chat that holds no turn is not a YUI turn's; the fence proves none was sent."""
     ws = await ready(client)
     STUB_ENV["HERMES_SESSION_CHAT_ID"] = CHAT
     tool_status.set_sink(adapter.push_tool_status)

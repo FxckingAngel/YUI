@@ -664,7 +664,7 @@ class YuiAdapter(BasePlatformAdapter):
         task.add_done_callback(self._sends.discard)
 
     async def _send_tool_status(self, chat_id: str, tool_state: str, tool_name: str) -> None:
-        """A call on a chat with no open turn is not a YUI turn's; never held, never retried."""
+        """A call on a chat that holds no turn is not a YUI turn's; never held, never retried."""
         turn = state.turn_id(chat_id)
         if turn is None:
             return
@@ -895,6 +895,8 @@ class YuiAdapter(BasePlatformAdapter):
         async with stream.lock:
             streamed = bool(stream.sent)
             stream.close()
+            # turn_id goes before close_turns, which clears what it reads.
+            addressed = state.turn_id(chat_id)
             ended = state.close_turns(chat_id)
             delivered = state.take_delivered(chat_id)
             if not delivered and not streamed:
@@ -904,7 +906,7 @@ class YuiAdapter(BasePlatformAdapter):
                 cues = [placement.cue for placement in state.pop_cues(chat_id)]
                 # Cues on a silent turn still play; the segment they ride on carries no speech.
                 if cues:
-                    frame = self._render(ended[0] if ended else None, [{"cues": cues, "speech": ""}])
+                    frame = self._render(addressed, [{"cues": cues, "speech": ""}])
                     await self._send_render(chat_id, frame)
                     ended = ended or [frame["turn_id"]]
             for ended_id in ended:
