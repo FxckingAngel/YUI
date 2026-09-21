@@ -320,7 +320,9 @@ async function bootstrap(): Promise<void> {
   // window variant auto-opens on creation but is idempotent, so defensively call once more.
   quickControls.open();
 
-  const unsubscribeLocale = subscribeLocale(() => {
+  const unsubscribeLocale = subscribeLocale((locale, previousLocale) => {
+    proactiveSettings.syncLocale(previousLocale, locale);
+    scheduleSettings.syncLocale(previousLocale, locale);
     queueMicrotask(() => {
       quickControls.dispose();
       quickControls = buildQuickControls();

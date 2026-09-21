@@ -502,7 +502,9 @@ async function bootstrap(): Promise<BootstrapHandle> {
   // Defer to microtask so triggering click handler (picker inside quick-controls) unwinds
   // before its host is disposed. Long-lived non-UI singletons (renderer, TTS pipeline, VAD,
   // voiceStatus store) and dispatcher-wired `surfaces` instance intentionally NOT re-created.
-  const unsubscribeLocale = subscribeLocale(() => {
+  const unsubscribeLocale = subscribeLocale((locale, previousLocale) => {
+    proactiveSettings.syncLocale(previousLocale, locale);
+    scheduleSettings.syncLocale(previousLocale, locale);
     queueMicrotask(() => {
       voiceInputIndicator.dispose();
       captureIndicator.dispose();
