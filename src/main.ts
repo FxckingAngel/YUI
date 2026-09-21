@@ -462,6 +462,9 @@ async function bootstrap(): Promise<BootstrapHandle> {
         }
       },
       onPopOut: () => openSettings(),
+      onMessage: () => {
+        if (!surfaces.isInputOpen()) surfaces.summonInput();
+      },
     });
   // DOM surfaces re-mounted on locale change (see i18n subscriber below). Held in
   // let bindings; onActivate arrows read the live binding, so recreating is safe.
