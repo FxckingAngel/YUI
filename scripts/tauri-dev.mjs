@@ -6,9 +6,13 @@ import { packageManagerCommand, stopProcessTree } from "./package-manager.mjs";
 
 const port = await resolvePort({ env: process.env, isPortFree: findFreePort });
 console.log(`[YUI] tauri dev → ${buildDevUrl(port)} (YUI_DEV_PORT=${port})`);
-const { command, args, shell } = packageManagerCommand(
-  ["exec", "tauri", "dev", "--config", tauriConfigArg(port)],
-);
+const { command, args, shell } = packageManagerCommand([
+  "exec",
+  "tauri",
+  "dev",
+  "--config",
+  tauriConfigArg(port),
+]);
 const child = spawn(command, args, {
   stdio: "inherit",
   detached: process.platform !== "win32",

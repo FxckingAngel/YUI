@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  packageManagerCommand,
-  quoteWindowsShellArg,
-} from "../scripts/package-manager.mjs";
+import { packageManagerCommand, quoteWindowsShellArg } from "../scripts/package-manager.mjs";
 
 describe("package manager launcher", () => {
   it("uses a shell only on Windows", () => {
@@ -20,8 +17,6 @@ describe("package manager launcher", () => {
   });
 
   it("quotes Windows shell metacharacters without changing the value", () => {
-    expect(quoteWindowsShellArg('a&b%c^d|e<f>g(h)"i')).toBe(
-      '"a^&b^%c^^d^|e^<f^>g^(h^)\\"i"',
-    );
+    expect(quoteWindowsShellArg('a&b%c^d|e<f>g(h)"i')).toBe('"a^&b^%c^^d^|e^<f^>g^(h^)\\"i"');
   });
 });
