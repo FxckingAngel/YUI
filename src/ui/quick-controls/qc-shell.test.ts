@@ -205,9 +205,7 @@ describe("createQuickControls — shell", () => {
     qc.open();
     expect(qc.isOpen()).toBe(true);
 
-    const closeBtn = qc.el.querySelector<HTMLButtonElement>(
-      ".yui-iconbtn--close",
-    )!;
+    const closeBtn = qc.el.querySelector<HTMLButtonElement>(".yui-iconbtn--close")!;
     closeBtn.click();
 
     expect(qc.isOpen()).toBe(false);
