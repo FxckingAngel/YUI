@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpeakerOption } from "./speaker-selection";
 
 const { listVoices, selectFetch } = vi.hoisted(() => ({
-  listVoices: vi.fn<(o: unknown) => Promise<string[]>>().mockResolvedValue([]),
+  listVoices: vi.fn<(o: unknown) => Promise<string[] | null>>().mockResolvedValue([]),
   selectFetch: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("./tts-voices", () => ({ listVoices }));
@@ -160,12 +160,52 @@ describe("createVoiceListRefresh", () => {
 });
 
 describe("createVoiceListRefresh — re-uploading user voices the server lost", () => {
+  beforeEach(() => {
+    listVoices.mockReset().mockResolvedValue([]);
+    noopLog.warn.mockClear();
+  });
+
   const userOpt: SpeakerOption = {
     id: "myvoice",
     label: "My Voice",
     ref_url: "asset://x/clip.mp3",
     source: "user",
   };
+
+  it("a failed list (null) leaves the manifest untouched and re-uploads nothing", async () => {
+    listVoices.mockResolvedValue(null);
+    const reuploadUserVoice = vi.fn();
+    const store = fakeStore([userOpt]);
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "http://localhost:8091" }),
+      speakerSelection: store,
+      reuploadUserVoice,
+      log: noopLog,
+    });
+
+    await refresh();
+
+    expect(store.setManifest).not.toHaveBeenCalled();
+    expect(reuploadUserVoice).not.toHaveBeenCalled();
+    expect(noopLog.warn).not.toHaveBeenCalledWith("voice_list_refresh_failed", expect.anything());
+  });
+
+  it("a successful empty list keeps today's behaviour: empty manifest + re-upload of the lost clip", async () => {
+    listVoices.mockResolvedValue([]);
+    const reuploadUserVoice = vi.fn().mockResolvedValue(undefined);
+    const store = fakeStore([userOpt]);
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "http://localhost:8091" }),
+      speakerSelection: store,
+      reuploadUserVoice,
+      log: noopLog,
+    });
+
+    await refresh();
+
+    expect(store._manifest()).toEqual({ available: [], defaultValue: "" });
+    expect(reuploadUserVoice).toHaveBeenCalledWith(userOpt);
+  });
 
   it("re-uploads a user option missing from the server list", async () => {
     listVoices.mockResolvedValue(["ナツメ"]);
