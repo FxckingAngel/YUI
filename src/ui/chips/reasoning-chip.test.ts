@@ -48,9 +48,9 @@ describe("createReasoningChip", () => {
     setLocale("en");
   });
 
-  function build(suppressed = false) {
+  function build() {
     store = fakePort();
-    const chip = createReasoningChip({ mount, store, suppressed });
+    const chip = createReasoningChip({ mount, store });
     return { store, chip };
   }
 
@@ -143,6 +143,16 @@ describe("createReasoningChip", () => {
     expect(rootEl().hidden).toBe(true);
   });
 
+  it("opens the panel again on the cycle after an abandoned one", () => {
+    build();
+    store.set({ text: "A", live: true });
+    store.set({ text: "", live: false });
+
+    store.set({ text: "B", live: true });
+
+    expect(panelEl().hidden).toBe(false);
+  });
+
   it("closes on every not-live update, even a manual open from a finished cycle", () => {
     build();
     store.set({ text: "AB", live: false });
@@ -195,27 +205,6 @@ describe("createReasoningChip", () => {
     chip.closePanel();
     chipButton().click();
     expect(onOpen).toHaveBeenCalledTimes(2);
-  });
-
-  it("stays hidden while suppressed and returns when unsuppressed", () => {
-    const { chip } = build(true);
-
-    store.set({ text: "A", live: true });
-    expect(rootEl().hidden).toBe(true);
-    expect(panelEl().hidden).toBe(true);
-
-    chip.setSuppressed(false);
-    expect(rootEl().hidden).toBe(false);
-  });
-
-  it("opens the panel when a live cycle is unsuppressed mid-stream", () => {
-    const { chip } = build(true);
-    store.set({ text: "A", live: true });
-
-    chip.setSuppressed(false);
-
-    expect(panelEl().hidden).toBe(false);
-    expect(chipButton().getAttribute("aria-expanded")).toBe("true");
   });
 
   it("relabels on a locale change", () => {

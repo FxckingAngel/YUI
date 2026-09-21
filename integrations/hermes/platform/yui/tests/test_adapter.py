@@ -656,6 +656,79 @@ async def test_approving_the_confirmation_leaves_the_next_reply_speakable(client
     assert frame["segments"] == [{"cues": [], "speech": "Hello again."}]
 
 
+async def test_a_stop_naming_an_open_turn_dispatches_the_gateway_stop_command(client, adapter):
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "1789365854947"))
+    await ws.send_json({"type": "stop", "turn_ids": ["1789365854947"]})
+    await wait_for(lambda: adapter.dispatched)
+    event = adapter.dispatched[-1]
+    assert event.text == "/stop"
+    assert event.allow_gateway_control is True
+    assert event.source.chat_id == CHAT
+
+
+@pytest.mark.parametrize("outcome", [ProcessingOutcome.CANCELLED, ProcessingOutcome.SUCCESS])
+async def test_the_stop_acknowledgement_is_not_spoken_but_the_next_reply_is(client, adapter, outcome):
+    """The mute holds with the run cancelled mid-flight and with it just gone idle."""
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await ws.send_json({"type": "stop", "turn_ids": ["777"]})
+    await wait_for(lambda: adapter.dispatched)
+    await adapter.send(CHAT, "⏹ Generation stopped.", metadata={"notify": True})
+    await adapter.on_processing_complete(user_turn(adapter, "777"), outcome)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    await adapter.on_processing_start(user_turn(adapter, "778"))
+    await adapter.send(CHAT, "Hello again.", metadata={"notify": True})
+    assert await recv(ws) == {
+        "type": "render",
+        "turn_id": "778",
+        "source": "hermes",
+        "segments": [{"cues": [], "speech": "Hello again."}],
+    }
+    # The next frame proves the stopped turn's end was the only one the stop closed.
+    adapter.notify_delegations(CHAT)
+    assert (await recv(ws))["type"] == "delegations"
+
+
+async def test_a_stop_naming_only_closed_turns_dispatches_nothing(client, adapter):
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await adapter.on_processing_complete(user_turn(adapter, "777"), ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    await ws.send_json({"type": "stop", "turn_ids": ["777"]})
+    # An empty turn answers at once, so its turn_end proves the stop frame was fully handled.
+    await ws.send_json({"type": "turn", "turn_id": "9", "client_context": "", "text": ""})
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "9"}
+    assert adapter.dispatched == []
+
+
+async def test_a_stop_leaving_a_newer_turn_unnamed_dispatches_nothing_and_ends_neither(client, adapter):
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await adapter.on_processing_start(user_turn(adapter, "778"))
+    await ws.send_json({"type": "stop", "turn_ids": ["777"]})
+    await ws.send_json({"type": "turn", "turn_id": "9", "client_context": "", "text": ""})
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "9"}
+    assert adapter.dispatched == []
+    # Both turns stay open and end through their own completions, newer one first.
+    await adapter.on_processing_complete(user_turn(adapter, "778"), ProcessingOutcome.SUCCESS)
+    await adapter.on_processing_complete(user_turn(adapter, "777"), ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    adapter.notify_delegations(CHAT)
+    assert (await recv(ws))["type"] == "delegations"
+
+
+@pytest.mark.parametrize("frame", [{}, {"turn_ids": []}, {"turn_ids": [777]}])
+async def test_a_stop_with_malformed_turn_ids_dispatches_nothing(client, adapter, frame):
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await ws.send_json({"type": "stop", **frame})
+    await ws.send_json({"type": "turn", "turn_id": "9", "client_context": "", "text": ""})
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "9"}
+    assert adapter.dispatched == []
+
+
 async def test_the_turn_id_is_bound_when_the_gateway_starts_the_turn(client, adapter):
     ws = await ready(client)
     await adapter.on_processing_start(user_turn(adapter, "777"))
@@ -746,20 +819,48 @@ async def test_a_follow_up_completed_inside_an_open_turn_waits_for_the_outer_one
     assert (await recv(ws))["type"] == "delegations"
 
 
-async def test_a_turn_the_gateway_takes_into_the_running_one_ends_with_it(client, adapter):
-    """Steered or redirected into the running turn, it never gets hooks of its own."""
+async def test_a_turn_the_gateway_takes_into_the_running_one_names_the_newest_turn(client, adapter):
+    """Steered or redirected into the running turn, it never gets hooks of its own, and every
+    frame the plugin sends after it arrives names it; both turns still end behind the run."""
     ws = await ready(client)
     running = user_turn(adapter, "777")
     await adapter.on_processing_start(running)
     adapter._active_sessions[adapter._event_session_key(running)] = object()
     await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
     await wait_for(lambda: adapter.dispatched)
+    await adapter.send(CHAT, "About the docs.", metadata={"notify": True})
+    assert await recv(ws) == {
+        "type": "render",
+        "turn_id": "778",
+        "source": "hermes",
+        "segments": [{"cues": [], "speech": "About the docs."}],
+    }
     await adapter.on_processing_complete(running, ProcessingOutcome.SUCCESS)
     assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
     assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
     # The next frame proves the two ends were all the pair sent.
     adapter.notify_delegations(CHAT)
     assert (await recv(ws))["type"] == "delegations"
+
+
+async def test_a_cue_only_render_after_a_turn_joined_names_the_joined_turn(client, adapter):
+    """Cues left at completion ride the newest turn the chat holds, not the one that opened first."""
+    ws = await ready(client)
+    running = user_turn(adapter, "777")
+    await adapter.on_processing_start(running)
+    adapter._active_sessions[adapter._event_session_key(running)] = object()
+    await ws.send_json({"type": "turn", "turn_id": "778", "client_context": "", "text": "and the docs?"})
+    await wait_for(lambda: adapter.dispatched)
+    state.append_cue(CHAT, {"emotion_id": "happy"}, "")
+    await adapter.on_processing_complete(running, ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {
+        "type": "render",
+        "turn_id": "778",
+        "source": "hermes",
+        "segments": [{"cues": [{"emotion_id": "happy"}], "speech": ""}],
+    }
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
 
 
 async def test_a_turn_the_gateway_gives_hooks_of_its_own_keeps_its_id(client, adapter):
@@ -868,7 +969,12 @@ async def test_a_turn_joined_to_a_failed_one_ends_behind_its_failure_line(client
     await wait_for(lambda: adapter.dispatched)
     await adapter.on_processing_complete(failed, ProcessingOutcome.FAILURE)
     await adapter.send(CHAT, "Sorry, that one broke.", metadata={"notify": True})
-    assert (await recv(ws))["type"] == "render"
+    assert await recv(ws) == {
+        "type": "render",
+        "turn_id": "778",
+        "source": "hermes",
+        "segments": [{"cues": [], "speech": "Sorry, that one broke."}],
+    }
     assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
     assert await recv(ws) == {"type": "turn_end", "turn_id": "778"}
 
@@ -1119,9 +1225,26 @@ async def test_the_reasoning_stream_reaches_the_client_as_one_coalesced_frame(cl
     ws = await ready(client)
     reasoning.set_sink(adapter.push_reasoning)
     STUB_ENV["HERMES_SESSION_CHAT_ID"] = CHAT
+    await adapter.on_processing_start(user_turn(adapter, "7"))
     for delta in ("I will ", "check ", "the log."):
         await asyncio.to_thread(reasoning.on_stream_delta, delta=delta, kind="reasoning", surface="yui")
-    assert await recv(ws) == {"type": "reasoning", "delta": "I will check the log."}
+    assert await recv(ws) == {"type": "reasoning", "turn_id": "7", "delta": "I will check the log."}
+
+
+async def test_a_reasoning_delta_flushed_after_its_turn_closed_sends_no_frame(client, adapter):
+    """Reasoning streams inside a turn; a window that outlives it has no turn to name."""
+    ws = await ready(client)
+    reasoning.set_sink(adapter.push_reasoning)
+    STUB_ENV["HERMES_SESSION_CHAT_ID"] = CHAT
+    await adapter.on_processing_start(user_turn(adapter, "7"))
+    await adapter.on_processing_complete(user_turn(adapter, "7"), ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "7"}
+    # The flush runs here directly: the armed task is still inside its window sleep.
+    adapter._collect_reasoning(CHAT, "HEAD")
+    await adapter._flush_reasoning(CHAT)
+    # An empty turn answers at once, so its turn_end proves no reasoning frame was queued ahead.
+    await ws.send_json({"type": "turn", "turn_id": "9", "client_context": "", "text": ""})
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "9"}
 
 
 async def test_the_render_carries_the_streamed_reasoning(client, adapter):
@@ -1170,6 +1293,7 @@ async def test_a_delta_that_lands_during_a_flush_leaves_on_the_next_one(client, 
         return await send_frame(chat_id, frame)
 
     monkeypatch.setattr(adapter, "_send_frame", admitting)
+    await adapter.on_processing_start(user_turn(adapter, "7"))
     adapter._collect_reasoning(CHAT, "HEAD")
     assert (await recv(ws))["delta"] == "HEAD"
     assert (await recv(ws))["delta"] == "TAIL"
@@ -1187,6 +1311,7 @@ async def test_a_new_turn_keeps_none_of_the_last_turns_reasoning(client, adapter
         return await send_frame(chat_id, frame)
 
     monkeypatch.setattr(adapter, "_send_frame", admitting)
+    await adapter.on_processing_start(user_turn(adapter, "7"))
     adapter._collect_reasoning(CHAT, "HEAD")
     assert (await recv(ws))["delta"] == "HEAD"
     await adapter.on_processing_start(user_turn(adapter, "8"))
@@ -1287,8 +1412,24 @@ async def test_a_tool_call_reaches_the_client_as_tool_status_frames(client, adap
     }
 
 
-async def test_a_tool_call_on_a_chat_with_no_open_turn_sends_no_frame(client, adapter):
-    """A call on a chat with no open turn is not a YUI turn's; the fence proves none was sent."""
+async def test_a_tool_call_after_a_turn_joined_names_the_joined_turn(client, adapter):
+    """The joined turn is the newest the chat holds, so its id names the frame."""
+    ws = await ready(client)
+    STUB_ENV["HERMES_SESSION_CHAT_ID"] = CHAT
+    tool_status.set_sink(adapter.push_tool_status)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    state.mark_joined(CHAT, "778")
+    await asyncio.to_thread(tool_status.on_pre_tool_call, tool_name="read_file", task_id="s", session_id="s")
+    assert await recv(ws) == {
+        "type": "tool_status",
+        "turn_id": "778",
+        "state": "running",
+        "tool_id": "read_file",
+    }
+
+
+async def test_a_tool_call_on_a_chat_with_no_turn_held_sends_no_frame(client, adapter):
+    """A call on a chat that holds no turn is not a YUI turn's; the fence proves none was sent."""
     ws = await ready(client)
     STUB_ENV["HERMES_SESSION_CHAT_ID"] = CHAT
     tool_status.set_sink(adapter.push_tool_status)

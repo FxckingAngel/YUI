@@ -313,6 +313,8 @@ class YuiAdapter(BasePlatformAdapter):
             self._publish_vocabulary(chat_id, frame.get("vocabulary"))
         elif kind == "reset":
             await self._on_reset(chat_id)
+        elif kind == "stop":
+            await self._on_stop(chat_id, frame)
         else:
             logger.debug("yui: ignoring frame type %r", kind)
 
@@ -391,6 +393,40 @@ class YuiAdapter(BasePlatformAdapter):
         # /new ends the delegations still running for this chat.
         delegations.forget(chat_id)
         await self._send_delegations(chat_id)
+
+    async def _on_stop(self, chat_id: str, frame: dict) -> None:
+        """The gateway's own /stop: the client stopped every turn outstanding on its side."""
+        turn_ids = frame.get("turn_ids")
+        if (
+            not isinstance(turn_ids, list)
+            or not turn_ids
+            or not all(isinstance(turn_id, str) for turn_id in turn_ids)
+        ):
+            logger.debug("yui: ignoring a stop without turn ids chat=%s", chat_id)
+            return
+        open_ids = state.open_turns(chat_id)
+        # A turn opened after the client stopped is not named; stopping with it would end one
+        # the client never meant to stop.
+        if not open_ids:
+            logger.debug("yui: stop with no open turn chat=%s", chat_id)
+            return
+        unnamed = [turn_id for turn_id in open_ids if turn_id not in turn_ids]
+        if unnamed:
+            logger.info(
+                "yui: stop left alone, open turns unnamed chat=%s turns=%s", chat_id, ",".join(unnamed)
+            )
+            return
+        # The client asked for the stop, so its acknowledgement is not worth speaking.
+        state.set_muted(chat_id, True)
+        logger.info("yui: stop chat=%s turns=%s", chat_id, ",".join(open_ids))
+        await self.handle_message(
+            MessageEvent(
+                text="/stop",
+                message_type=MessageType.TEXT,
+                allow_gateway_control=True,
+                source=self._source(chat_id),
+            )
+        )
 
     async def send_slash_confirm(
         self,
@@ -531,8 +567,10 @@ class YuiAdapter(BasePlatformAdapter):
         try:
             await asyncio.sleep(REASONING_WINDOW_SECONDS)
             delta = "".join(self._reasoning_pending.pop(chat_id, []))
-            if delta:
-                await self._send_frame(chat_id, {"type": "reasoning", "delta": delta})
+            # A delta whose turn closed inside the window names no turn; the client could not place it.
+            turn = state.turn_id(chat_id)
+            if delta and turn is not None:
+                await self._send_frame(chat_id, {"type": "reasoning", "turn_id": turn, "delta": delta})
         finally:
             # No running loop only when the coroutine is collected after loop teardown.
             with contextlib.suppress(RuntimeError):
@@ -626,7 +664,7 @@ class YuiAdapter(BasePlatformAdapter):
         task.add_done_callback(self._sends.discard)
 
     async def _send_tool_status(self, chat_id: str, tool_state: str, tool_name: str) -> None:
-        """A call on a chat with no open turn is not a YUI turn's; never held, never retried."""
+        """A call on a chat that holds no turn is not a YUI turn's; never held, never retried."""
         turn = state.turn_id(chat_id)
         if turn is None:
             return
@@ -694,7 +732,7 @@ class YuiAdapter(BasePlatformAdapter):
         if state.take_muted(chat_id):
             state.pop_cues(chat_id)
             state.mark_delivered(chat_id)
-            logger.info("yui: reset acknowledgement not spoken chat=%s", chat_id)
+            logger.info("yui: acknowledgement not spoken chat=%s", chat_id)
             return SendResult(success=True, message_id=_message_id())
         stream = self._stream(chat_id)
         async with stream.lock:
@@ -857,6 +895,8 @@ class YuiAdapter(BasePlatformAdapter):
         async with stream.lock:
             streamed = bool(stream.sent)
             stream.close()
+            # turn_id goes before close_turns, which clears what it reads.
+            addressed = state.turn_id(chat_id)
             ended = state.close_turns(chat_id)
             delivered = state.take_delivered(chat_id)
             if not delivered and not streamed:
@@ -866,7 +906,7 @@ class YuiAdapter(BasePlatformAdapter):
                 cues = [placement.cue for placement in state.pop_cues(chat_id)]
                 # Cues on a silent turn still play; the segment they ride on carries no speech.
                 if cues:
-                    frame = self._render(ended[0] if ended else None, [{"cues": cues, "speech": ""}])
+                    frame = self._render(addressed, [{"cues": cues, "speech": ""}])
                     await self._send_render(chat_id, frame)
                     ended = ended or [frame["turn_id"]]
             for ended_id in ended:

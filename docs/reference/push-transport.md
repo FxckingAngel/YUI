@@ -2,6 +2,8 @@
 
 `chat_api: "push"` connects the client to the backend over one WebSocket. The client sends turns on it and the backend sends finished replies on it. The connection stays open, so a reply arrives without a request, including a report on work the backend finished on its own.
 
+Push is an optional extension for backends that can deliver without a request. Request-scoped features behave the same over the request transports — the Responses API, and Chat Completions where its wire carries the data — so a backend that does not speak push loses none of them.
+
 The client renders what arrives and judges nothing. Everything the backend must know is in this document; the backend adapter for a specific agent lives under `integrations/<agent>/`.
 
 ## Limits
@@ -84,6 +86,8 @@ The `vocabulary` object from `hello`, sent again whenever the renderable set cha
 
 `client_context` is the block described in [client-context.md](client-context.md), exactly as the other modes send it. `text` is the user utterance, or `""` on a turn no user typed or spoke. Every frame the backend sends for the turn carries the same `turn_id`, and a `turn_end` frame closes it.
 
+A backend that takes a new turn's text while it is still running an older one — into that run, or queued behind it — sends every frame that follows under the newer turn's `turn_id`, and closes both turns with their own `turn_end`. The client has stopped the older turn by then and drops frames that name it.
+
 A `turn_id` names one turn for as long as the backend remembers it. The client reads the wall clock when a run starts and counts up from there, one per turn. A run moves the counter on by its turn count and a restart reseeds from the clock, so a late `render` from a run that began at an earlier clock reading carries an id below the range this run issues. A run the backend starts on its own, such as a report on finished work, carries a `turn_id` the backend mints. Backend ids never collide with client ids; the backend adapter states the form its ids take.
 
 The client shows the turn running from the `turn` frame to its `turn_end`:
@@ -101,6 +105,14 @@ The client waits for each frame of the turn for the wait in the limits table, co
 ```
 
 The backend starts a new conversation under the same `chat_id`. Long-term memory the backend keeps across conversations stays. The transcript starts empty. Work the backend delegated in the old conversation ends with it, and the next `delegations` frame lists nothing.
+
+### `stop` (client → backend)
+
+```json
+{ "type": "stop", "turn_ids": ["1789365854947", "1789365854950"] }
+```
+
+The user pressed stop. `turn_ids` are the turns the client just stopped — every turn that was outstanding on the chat at that moment. The backend stops generating for those of them that are still running and sends each its `turn_end`; an id it no longer holds is ignored, and a turn that is not named — one the backend started after the client's stop — keeps running. A backend that cannot stop the named turns without also stopping an unnamed one ignores the frame. A backend that ignores `stop` stays correct: the client drops the stopped turns' frames until their `turn_end`, as it does without it. Whether stopping a turn also ends work that turn delegated is the backend's decision; a delegation it ends is reported through `delegations`. Sent only while the socket is `ready`.
 
 ## Replies
 
@@ -191,19 +203,24 @@ The backend's reasoning as it is written, sent while the turn is running.
 ```json
 {
   "type": "reasoning",
+  "turn_id": "1789365854947",
   "delta": "The log is the first place to look."
 }
 ```
 
 | Field | Value |
 |---|---|
+| `turn_id` | The turn the reasoning belongs to |
 | `delta` | The reasoning written since the previous `reasoning` frame |
 
 Frames are coalesced, so one carries however much arrived in the window. They are best effort: a
 backend under load drops them, and a turn may carry none at all. The `render` frame's `reasoning`
 field is where the text arrives whole — from a frame that plays. A `render` dropped for a stopped
 turn abandons the reasoning still streaming for that turn; a text an earlier render already
-finished stays.
+finished stays. A `reasoning` frame of a turn the user stopped is dropped like the turn's other
+frames, and the turn's `turn_end` ends reasoning still showing.
+While one turn's reasoning is streaming, the `reasoning` of a `render` that belongs to another turn
+is not shown.
 
 ### `delegations` (backend → client)
 
@@ -232,4 +249,4 @@ The client keeps the latest list; a `done` item leaves the chip 30 minutes after
 
 ## Logging
 
-A `turn` sent over the socket writes a turn record with `spoke_text: false`. A `render` writes a `push.render` record with `source`, `turn_id`, the segment count, whether any speech played, and whether speech was still owed when the frame arrived. A `render` dropped for a stopped turn is logged as a `render` line with `dropped: "cut_turn"` and `stopped_count`, how many stopped turns are still waiting for their `turn_end`. A `speech` frame writes `push.speech` to the app log with `turn_id` and the segment count; one dropped for a stopped turn also carries `dropped: "cut_turn"` and `stopped_count`. A frame wait that reaches the limit writes `network_stall` with `stage: push_wait`, and a wait the socket leaving `ready` ended writes `network_drop` with the same stage. A `turn_end` writes `push.turn_end` to the app log with `turn_id`. A `tool_status` frame writes `push.tool_status` with `turn_id`, `state` and `tool_id`; one dropped for a stopped turn carries `dropped: "cut_turn"` and `stopped_count` instead. A frame over the size limit is never sent and is dropped unread on arrival; either case writes `frame_oversize` with `direction`. The app log carries `ws_open`, `ws_ready`, `ws_close` with the close code, and `ws_reconnect` with the delay.
+A `turn` sent over the socket writes a turn record with `spoke_text: false`. A `render` writes a `push.render` record with `source`, `turn_id`, the segment count, whether any speech played, and whether speech was still owed when the frame arrived. A `render` dropped for a stopped turn is logged as a `render` line with `dropped: "cut_turn"` and `stopped_count`, how many stopped turns are still waiting for their `turn_end`. A `speech` frame writes `push.speech` to the app log with `turn_id` and the segment count; one dropped for a stopped turn also carries `dropped: "cut_turn"` and `stopped_count`. A frame wait that reaches the limit writes `network_stall` with `stage: push_wait`, and a wait the socket leaving `ready` ended writes `network_drop` with the same stage. A `turn_end` writes `push.turn_end` to the app log with `turn_id`. A `stop` that went out writes `push.stop` with the number of turns it named. A `tool_status` frame writes `push.tool_status` with `turn_id`, `state` and `tool_id`; one dropped for a stopped turn carries `dropped: "cut_turn"` and `stopped_count` instead. A frame over the size limit is never sent and is dropped unread on arrival; either case writes `frame_oversize` with `direction`. The app log carries `ws_open`, `ws_ready`, `ws_close` with the close code, and `ws_reconnect` with the delay.

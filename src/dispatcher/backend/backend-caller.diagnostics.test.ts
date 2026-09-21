@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { ToolStatus, Usage } from "../../contract";
+import { createReasoningStore } from "../../io/bridge/reasoning-store";
 import type {
   ChatHistoryEntry,
   ChatHistoryItem,
@@ -28,6 +29,7 @@ import {
   turnOf,
   userEnv,
 } from "../test-helpers";
+import { createTurnFeed } from "../turn/turn-feed";
 import { type BackendCaller, createBackendCaller } from "./backend-caller";
 import { PRE_SPEECH_TIMEOUT_MS, SPEECH_IDLE_TIMEOUT_MS } from "./idle-watchdog";
 
@@ -53,7 +55,7 @@ beforeEach(() => {
     getFetch: async () => undefined,
     stream: script.stream,
     turnOutput,
-    onToolStatus: toolStatusSink,
+    turnFeed: createTurnFeed({ onToolStatus: toolStatusSink, reasoning: createReasoningStore() }),
     onUsage: usageSink,
     logger,
   });
@@ -199,7 +201,7 @@ describe("backend_caller — idle-gap watchdog", () => {
     expect(res).toBe("ok");
   });
 
-  it("keepalive events during a long reasoning phase reset the watchdog — no stall even though the gap to first speech exceeds SPEECH_IDLE_TIMEOUT_MS", async () => {
+  it("keepalive heartbeats during a long gap before first speech reset the watchdog — no stall even though the gap exceeds SPEECH_IDLE_TIMEOUT_MS", async () => {
     const gap = SPEECH_IDLE_TIMEOUT_MS - 5_000;
     script.events = [
       keepaliveEvent(),
