@@ -15,6 +15,7 @@
 import "./styles.css";
 import { createTier1Engine } from "./ambient/liveliness/tier1";
 import { createConfiguredBootstrap } from "./app/bootstrap-configured";
+import { registerRendererAndAmbientDisposal } from "./app/bootstrap-disposal";
 import { wireCrossWindowSync, wireDevGlobals } from "./app/cross-window/wire-cross-window";
 import { wireSettingsReload } from "./app/cross-window/wire-window-sync";
 import { wireSpeakerSelection, wireVrmSelection } from "./app/settings/wire-avatar";
@@ -158,6 +159,7 @@ async function bootstrap(): Promise<BootstrapHandle> {
   // starting before loadVRM is safe (frames without VRM are no-op).
   const ambient = createTier1Engine(renderer);
   ambient.start();
+  registerRendererAndAmbientDisposal(register, renderer, ambient);
   // Read at endSpeech time — the stores below are built after the surfaces mount.
   const localSurfaces = createSurfaces({
     mount: root,
