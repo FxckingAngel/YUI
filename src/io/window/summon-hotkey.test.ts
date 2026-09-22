@@ -197,7 +197,7 @@ describe("createSummonHotkey — trigger", () => {
     expect(f.deps.summonInput).toHaveBeenCalledTimes(1);
   });
 
-  it("입력이 이미 열려 있으면 focusWindow만 하고 summonInput은 건너뛴다", async () => {
+  it("lets summonInput own the open-state guard", async () => {
     const f = fakeDeps();
     const hotkey = createSummonHotkey(f.deps);
     await hotkey.apply("CmdOrCtrl+Shift+Y");
@@ -207,7 +207,7 @@ describe("createSummonHotkey — trigger", () => {
     f.trigger("CmdOrCtrl+Shift+Y");
     await flush();
     expect(f.deps.focusWindow).toHaveBeenCalledTimes(2);
-    expect(f.deps.summonInput).toHaveBeenCalledTimes(1);
+    expect(f.deps.summonInput).toHaveBeenCalledTimes(2);
   });
 
   it("사이클 진행 중 도착한 연타(키 리핏)는 흘려 이중 소환하지 않는다", async () => {

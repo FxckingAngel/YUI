@@ -730,6 +730,17 @@ describe("input error clearing — turn start, manual dismiss, existing paths", 
     expect(form().classList.contains("is-error")).toBe(false);
     expect(errorEl().textContent).toBe("");
   });
+
+  it("does not reset a pending submit when summoned again", () => {
+    s.summonInput();
+    field().value = "keep this text";
+    s.setInputEnabled(false);
+
+    s.summonInput();
+
+    expect(form().classList.contains("is-pending")).toBe(true);
+    expect(field().value).toBe("keep this text");
+  });
 });
 
 // The input row carries the same exit as the bubble: while typing, the user can move
