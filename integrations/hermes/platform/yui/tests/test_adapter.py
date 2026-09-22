@@ -1709,6 +1709,17 @@ async def test_a_streamed_sentence_leaves_without_the_windows_path_the_gateways_
     assert await recv(ws) == speech_frame("777", "Want the summary?")
 
 
+async def test_a_windows_path_with_spaces_is_removed_from_speech(client, adapter, monkeypatch):
+    spaced = r"C:\Users\yui\Program Files\audit.md"
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == spaced or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, f"The report is at {spaced}. Want the summary? ")
+    assert await recv(ws) == speech_frame("777", "The report is at .")
+    assert await recv(ws) == speech_frame("777", "Want the summary?")
+
+
 async def test_a_send_with_the_same_windows_path_renders_only_the_unspoken_tail(
     client, adapter, caplog, monkeypatch
 ):
