@@ -101,9 +101,9 @@ export function createTextInput(
     // Idempotent: a re-summon on an open input must not reset error/pending state or replay the reveal.
     if (isInputOpen()) return;
     formEl.hidden = false;
-    fitField();
     formEl.classList.remove("is-error", "is-pending");
     errorEl.textContent = "";
+    fitField();
     requestAnimationFrame(() => {
       formEl.classList.add("is-open");
       field.focus();
@@ -139,11 +139,14 @@ export function createTextInput(
   function clearInputError(): void {
     formEl.classList.remove("is-error");
     errorEl.textContent = "";
-    // The field widens back — refit its height.
+    // The row loses its error line — re-lift the bubble.
     fitField();
   }
 
   function showInputError(message: string, action?: InputErrorAction): void {
+    // Shown first — the alert only announces content inserted while it is in the tree.
+    formEl.classList.add("is-error");
+    formEl.classList.remove("is-pending");
     errorEl.textContent = message;
     if (action) {
       const button = document.createElement("button");
@@ -168,9 +171,7 @@ export function createTextInput(
       field.focus();
     });
     errorEl.append(dismiss);
-    formEl.classList.add("is-error");
-    formEl.classList.remove("is-pending");
-    // The error span narrows the field — refit its height.
+    // The row gains its error line — re-lift the bubble.
     fitField();
   }
 
@@ -291,8 +292,7 @@ export function createTextInput(
     if (busy) return; // While processing, Enter/submit is a no-op — stopping only via a button click
     const text = field.value.trim();
     if (text === "" && attachments.length === 0) return;
-    formEl.classList.remove("is-error");
-    errorEl.textContent = "";
+    clearInputError();
     const images = attachments.slice();
     for (const cb of submitHandlers) cb(text, images);
     clearAttachments();
