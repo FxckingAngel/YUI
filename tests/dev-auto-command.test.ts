@@ -19,9 +19,14 @@ describe("package manager launcher", () => {
 
   it("quotes Windows shell metacharacters without changing the value", async () => {
     const value = 'a&b%c^d|e<f>g(h)"i';
-    const { command, args, shell } = packageManagerCommand(
-      ["exec", "node", "-p", "process.argv[1]", "--", value],
-    );
+    const { command, args, shell } = packageManagerCommand([
+      "exec",
+      "node",
+      "-p",
+      "process.argv[1]",
+      "--",
+      value,
+    ]);
     const output = await new Promise<string>((resolve, reject) => {
       const child = spawn(command, args, { shell });
       let stdout = "";
@@ -39,9 +44,15 @@ describe("package manager launcher", () => {
 
   it("passes the Tauri JSON config value to the child unchanged", async () => {
     const config = JSON.stringify({ build: { devUrl: "http://127.0.0.1:1738" } });
-    const { command, args, shell } = packageManagerCommand(
-      ["exec", "node", "-p", "process.argv[2]", "--", "--config", config],
-    );
+    const { command, args, shell } = packageManagerCommand([
+      "exec",
+      "node",
+      "-p",
+      "process.argv[2]",
+      "--",
+      "--config",
+      config,
+    ]);
     const output = await new Promise<string>((resolve, reject) => {
       const child = spawn(command, args, { shell });
       let stdout = "";
