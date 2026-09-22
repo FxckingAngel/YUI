@@ -18,6 +18,7 @@ import itertools
 import json
 import logging
 import os
+import re
 import sys
 import time
 from typing import Any
@@ -52,6 +53,7 @@ CLOSE_REPLACED = 4409
 
 # A run the gateway starts on its own still names a turn; the client's ids are decimal digits only.
 _TURN_IDS = itertools.count(1)
+_WINDOWS_PATH_RE = re.compile(r"(?<!\S)(?:[A-Za-z]:\\|\\\\)[^\r\n]*?(?=\s|$)")
 
 
 def _mint_turn_id() -> str:
@@ -80,6 +82,18 @@ def _message_id() -> str:
 
 def _chat_of(event: MessageEvent) -> str:
     return str(getattr(getattr(event, "source", None), "chat_id", "") or "")
+
+
+def _strip_windows_local_files(text: str) -> str:
+    """Remove existing Windows paths when the gateway's Unix-only cleaner misses them."""
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        candidate = raw.rstrip(".,;:!?)]")
+        if not candidate or not os.path.isfile(candidate):
+            return raw
+        return raw[len(candidate) :]
+
+    return _WINDOWS_PATH_RE.sub(replace, text).strip()
 
 
 class YuiAdapter(BasePlatformAdapter):
@@ -517,7 +531,9 @@ class YuiAdapter(BasePlatformAdapter):
         """The text the gateway would send, in the order it cleans a reply."""
         text = self.extract_media(text)[1]
         text = self.extract_images(text)[1]
-        return self.extract_local_files(self.strip_media_directives_for_display(text))[1]
+        text = self.strip_media_directives_for_display(text)
+        text = self.extract_local_files(text)[1]
+        return _strip_windows_local_files(text)
 
     async def _send_speech(self, chat_id: str, sentence: str, cues: list[dict]) -> bool:
         """A speech frame is never held, and trimming it would drop its only sentence."""
