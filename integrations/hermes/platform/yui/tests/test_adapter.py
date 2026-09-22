@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 
 import aiohttp
@@ -1454,6 +1455,9 @@ async def test_a_tool_call_on_a_chat_with_no_turn_held_sends_no_frame(client, ad
 ANSWER = "20260917_101010_ab12:20260917_101010_ab12:0f3c9a1e"
 NEXT_ANSWER = "20260917_101010_ab12:20260917_101010_ab12:7d2e4b90"
 
+# A Windows path the gateway's Unix-only cleaner leaves in the text.
+WIN_PATH = r"C:\Users\me\audit.md"
+
 
 def speech_frame(turn_id, speech, cues=()):
     return {"type": "speech", "turn_id": turn_id, "segments": [{"cues": list(cues), "speech": speech}]}
@@ -1691,6 +1695,67 @@ async def test_a_streamed_sentence_that_is_only_such_a_path_is_not_spoken(client
     assert await recv(ws) == speech_frame("777", "The summary is short.")
     await adapter.send(CHAT, "The summary is short. Done.", metadata={"notify": True})
     assert await recv(ws) == render_frame("777", [{"cues": [], "speech": "Done."}])
+
+
+async def test_a_streamed_sentence_leaves_without_the_windows_path_the_gateways_cleaner_misses(
+    client, adapter, monkeypatch
+):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == WIN_PATH or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, f"The report is at {WIN_PATH}. Want the summary? ")
+    assert await recv(ws) == speech_frame("777", "The report is at .")
+    assert await recv(ws) == speech_frame("777", "Want the summary?")
+
+
+async def test_a_send_with_the_same_windows_path_renders_only_the_unspoken_tail(
+    client, adapter, caplog, monkeypatch
+):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == WIN_PATH or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, f"The report is at {WIN_PATH}. Want the summary? ")
+    assert await recv(ws) == speech_frame("777", "The report is at .")
+    assert await recv(ws) == speech_frame("777", "Want the summary?")
+    with caplog.at_level(logging.INFO):
+        await adapter.send(
+            CHAT, f"The report is at {WIN_PATH}. Want the summary? It is short.", metadata={"notify": True}
+        )
+    assert await recv(ws) == render_frame("777", [{"cues": [], "speech": "It is short."}])
+    assert "send does not continue the streamed text" not in caplog.text
+
+
+async def test_a_windows_path_that_is_no_file_stays_in_the_speech(client, adapter):
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, r"Open C:\Users\me\missing.md first. ")
+    assert await recv(ws) == speech_frame("777", r"Open C:\Users\me\missing.md first.")
+
+
+async def test_a_unc_path_is_never_looked_up(client, adapter, monkeypatch):
+    """A stat of \\\\host\\share opens an SMB session on Windows; the cleaner only takes drive paths."""
+    looked_up: list[str] = []
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: looked_up.append(p) or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, r"Try \\10.0.0.5\c$\x.md next. ")
+    assert await recv(ws) == speech_frame("777", r"Try \\10.0.0.5\c$\x.md next.")
+    assert not any(p.startswith("\\\\") for p in looked_up)
+
+
+async def test_a_send_that_is_only_a_windows_path_renders_nothing(client, adapter, caplog, monkeypatch):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == WIN_PATH or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    with caplog.at_level(logging.DEBUG):
+        await adapter.send(CHAT, WIN_PATH, metadata={"notify": True})
+    assert "nothing to render for this send" in caplog.text
+    await adapter.on_processing_complete(user_turn(adapter, "777"), ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
 
 
 async def test_a_client_that_reconnects_mid_answer_gets_the_rest_of_the_turn_in_its_render(client, adapter):
