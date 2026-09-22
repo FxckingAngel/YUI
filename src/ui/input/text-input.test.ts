@@ -684,9 +684,7 @@ describe("input error layout", () => {
     expect(css).toMatch(
       /\.yui-input__error\s*\{[\s\S]*?display:\s*none;[\s\S]*?order:\s*1;[\s\S]*?flex:\s*1\s+0\s+100%;[\s\S]*?white-space:\s*normal;/,
     );
-    expect(css).toMatch(
-      /\.yui-input\.is-error\s+\.yui-input__error\s*\{[\s\S]*?display:\s*block;/,
-    );
+    expect(css).toMatch(/\.yui-input\.is-error\s+\.yui-input__error\s*\{[\s\S]*?display:\s*block;/);
   });
 });
 
