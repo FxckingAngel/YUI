@@ -103,6 +103,7 @@ export function createTextInput(
   }
 
   function summonInput(): void {
+    if (!formEl.hidden) return;
     formEl.hidden = false;
     fitField();
     formEl.classList.remove("is-error", "is-pending");

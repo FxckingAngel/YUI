@@ -23,8 +23,6 @@ interface SummonHotkeyDeps {
   /** Bring the window forward + focus (including activating the app from the background). */
   focusWindow(): Promise<void>;
   summonInput(): void;
-  /** Whether the input is already open — if so, don't re-summon (just bring the window forward). */
-  isInputOpen(): boolean;
   /** The accelerator failed to register after every retry (OS/another app holds it). */
   onRegisterFailed?(accelerator: string): void;
 }
@@ -75,14 +73,13 @@ export function createSummonHotkey(deps: SummonHotkeyDeps): SummonHotkey {
     if (event.state !== "Pressed") return;
     if (inFlight) return;
     inFlight = true;
-    // Even re-firing from another app always brings the window forward. Summon only when the
-    // input is closed — so key repeat/re-fire doesn't reset the open animation or error display
-    // (same as the local "/" guard).
+    // Even re-firing from another app always brings the window forward. summonInput() owns the
+    // open-state guard so this path cannot reset the error or pending state.
     void deps
       .focusWindow()
       .catch((err) => log.warn("focus_failed", { error: String(err) }))
       .then(() => {
-        if (!deps.isInputOpen()) deps.summonInput();
+        deps.summonInput();
       })
       .finally(() => {
         inFlight = false;
