@@ -676,6 +676,20 @@ describe("showInputError — inline fix affordance", () => {
   });
 });
 
+describe("input error layout", () => {
+  it("keeps the error below the controls so it cannot squeeze the field", () => {
+    const css = readSrc("../surfaces/surfaces.css");
+
+    expect(css).toMatch(/\.yui-input__row\s*\{[\s\S]*?flex-wrap:\s*wrap;/);
+    expect(css).toMatch(
+      /\.yui-input__error\s*\{[\s\S]*?display:\s*none;[\s\S]*?order:\s*1;[\s\S]*?flex:\s*1\s+0\s+100%;[\s\S]*?white-space:\s*normal;/,
+    );
+    expect(css).toMatch(
+      /\.yui-input\.is-error\s+\.yui-input__error\s*\{[\s\S]*?display:\s*block;/,
+    );
+  });
+});
+
 describe("input error clearing — turn start, manual dismiss, existing paths", () => {
   let mount: HTMLElement;
   let s: ReturnType<typeof createSurfaces>;
