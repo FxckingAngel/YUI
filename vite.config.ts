@@ -54,6 +54,10 @@ export default defineConfig(() => ({
     port: resolveVitePort(),
     strictPort: true,
     host: "127.0.0.1",
+    watch: {
+      // Rust rebuilds replace locked DLLs under this directory on Windows.
+      ignored: ["**/src-tauri/target/**"],
+    },
     // Same-origin /__hermes → dev proxy to the Responses backend (avoids web chat CORS preflight, SSE streaming).
     // :8643 stays in sync with chat_base_url in configs/endpoints.json.
     proxy: {
