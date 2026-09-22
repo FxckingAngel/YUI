@@ -1,16 +1,7 @@
 import { spawn } from "node:child_process";
 
 export function quoteWindowsShellArg(value) {
-  return `"${String(value)
-    .replaceAll("^", "^^")
-    .replaceAll("%", "^%")
-    .replaceAll("&", "^&")
-    .replaceAll("|", "^|")
-    .replaceAll("<", "^<")
-    .replaceAll(">", "^>")
-    .replaceAll("(", "^(")
-    .replaceAll(")", "^)")
-    .replaceAll('"', '\\"')}"`;
+  return `"${String(value).replaceAll('"', '\\"')}"`;
 }
 
 export function packageManagerCommand(args, platform = process.platform) {
