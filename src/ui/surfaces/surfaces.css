@@ -589,7 +589,7 @@
 .yui-input__row {
   display: flex;
   flex-wrap: wrap;
-  /* Buttons ride the last line; the bottom margins re-center them on the one-line field (2.43rem). */
+  /* Buttons ride the field's last text line; the bottom margins re-center them on the one-line field (2.43rem). */
   align-items: flex-end;
 }
 .yui-input__attach {
