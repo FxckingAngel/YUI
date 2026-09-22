@@ -86,6 +86,7 @@ def _chat_of(event: MessageEvent) -> str:
 
 def _strip_windows_local_files(text: str) -> str:
     """Remove existing Windows paths when the gateway's Unix-only cleaner misses them."""
+
     def replace(match: re.Match[str]) -> str:
         raw = match.group(0)
         candidate = raw.rstrip(".,;:!?)]")
