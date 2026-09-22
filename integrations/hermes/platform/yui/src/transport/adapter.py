@@ -94,7 +94,8 @@ def _strip_windows_local_files(text: str) -> str:
             return raw
         return raw[len(candidate) :]
 
-    return _WINDOWS_PATH_RE.sub(replace, text).strip()
+    cleaned = _WINDOWS_PATH_RE.sub(replace, text)
+    return cleaned.strip() if cleaned != text else cleaned
 
 
 class YuiAdapter(BasePlatformAdapter):
@@ -621,6 +622,7 @@ class YuiAdapter(BasePlatformAdapter):
 
     async def _deliver(self, chat_id: str, content: str, meta: dict) -> SendResult:
         """Render a reply; only the gateway's own markers keep a send off the wire."""
+        content = _strip_windows_local_files(content or "")
         if meta.get(NOTICE_MARKER):
             logger.info("yui: gateway notice not spoken chat=%s", chat_id)
             return SendResult(success=True, message_id=_message_id())
