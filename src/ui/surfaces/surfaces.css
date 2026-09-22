@@ -784,6 +784,7 @@
   order: 1;
   flex: 1 0 100%;
   min-width: 0;
+  box-sizing: border-box;
   padding: 0.1rem 0.6rem 0.45rem;
   color: var(--yui-danger);
   font-size: 0.78rem;

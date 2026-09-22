@@ -139,11 +139,13 @@ export function createTextInput(
   function clearInputError(): void {
     formEl.classList.remove("is-error");
     errorEl.textContent = "";
-    // The field widens back — refit its height.
     fitField();
   }
 
   function showInputError(message: string, action?: InputErrorAction): void {
+    // Shown first — the alert only announces content inserted while it is in the tree.
+    formEl.classList.add("is-error");
+    formEl.classList.remove("is-pending");
     errorEl.textContent = message;
     if (action) {
       const button = document.createElement("button");
@@ -168,9 +170,6 @@ export function createTextInput(
       field.focus();
     });
     errorEl.append(dismiss);
-    formEl.classList.add("is-error");
-    formEl.classList.remove("is-pending");
-    // The error span narrows the field — refit its height.
     fitField();
   }
 
