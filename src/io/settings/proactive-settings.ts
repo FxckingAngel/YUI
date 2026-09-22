@@ -31,11 +31,17 @@ export function defaultSettings(locale: CueLocale): ProactiveSettings {
 }
 
 export function createProactiveSettings(opts?: { storage?: ProactiveStorage; locale?: CueLocale }) {
-  return createCueListSettings<ProactiveCue>({
+  const store = createCueListSettings<ProactiveCue>({
     storage: opts?.storage,
     defaults: defaultSettings(opts?.locale ?? "ko"),
     extras: { idle_min: { blank: 10, isValid: isValidIdleMin } },
   });
+  return {
+    ...store,
+    syncLocale(previous: CueLocale, next: CueLocale): void {
+      store.syncLocale(defaultSettings(previous), defaultSettings(next));
+    },
+  };
 }
 
 /** localStorage-backed ProactiveStorage adapter. Gracefully ignored where localStorage is unavailable. */

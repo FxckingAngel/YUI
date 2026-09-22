@@ -19,6 +19,7 @@ import { registerRendererAndAmbientDisposal } from "./app/bootstrap-disposal";
 import { wireCrossWindowSync, wireDevGlobals } from "./app/cross-window/wire-cross-window";
 import { wireSettingsReload } from "./app/cross-window/wire-window-sync";
 import { wireSpeakerSelection, wireVrmSelection } from "./app/settings/wire-avatar";
+import { wireCueLocaleSync } from "./app/settings/wire-cue-locale-sync";
 import { wirePushMode } from "./app/turn/wire-push";
 import { CHAT_API_KEY_SECRET, STT_API_KEY_SECRET, TTS_API_KEY_SECRET } from "./config/load";
 import { createConfigStore } from "./config/store";
@@ -502,6 +503,7 @@ async function bootstrap(): Promise<BootstrapHandle> {
   // Defer to microtask so triggering click handler (picker inside quick-controls) unwinds
   // before its host is disposed. Long-lived non-UI singletons (renderer, TTS pipeline, VAD,
   // voiceStatus store) and dispatcher-wired `surfaces` instance intentionally NOT re-created.
+  register(wireCueLocaleSync(settingsStores));
   const unsubscribeLocale = subscribeLocale(() => {
     queueMicrotask(() => {
       voiceInputIndicator.dispose();

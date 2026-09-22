@@ -84,6 +84,23 @@ export function createCueListSettings<C extends Cue>(cfg: CueListConfig<C>) {
   return {
     get: core.get,
 
+    syncLocale(previous: CueListSettings<C>, next: CueListSettings<C>): void {
+      const current = core.current();
+      const nextById = new Map(next.entries.map((cue) => [cue.id, cue]));
+      const previousById = new Map(previous.entries.map((cue) => [cue.id, cue]));
+      let changed = false;
+      const entries = current.entries.map((cue) => {
+        const previousCue = previousById.get(cue.id);
+        const nextCue = nextById.get(cue.id);
+        if (previousCue && nextCue && JSON.stringify(cue) === JSON.stringify(previousCue)) {
+          changed = true;
+          return structuredClone(nextCue);
+        }
+        return cue;
+      });
+      if (changed) core.commit({ ...current, entries });
+    },
+
     setEnabled(enabled: boolean): void {
       core.commit({ ...core.current(), enabled });
     },

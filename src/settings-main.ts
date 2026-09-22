@@ -9,6 +9,7 @@
 import "./styles.css";
 import { wireSettingsWindowSync } from "./app/cross-window/wire-cross-window";
 import { createEffectiveEndpoints, wireSpeakerSelection } from "./app/settings/wire-avatar";
+import { wireCueLocaleSync } from "./app/settings/wire-cue-locale-sync";
 import { TTS_API_KEY_SECRET } from "./config/load";
 import { createConfigStore } from "./config/store";
 import { importVrmFromFile, removeUserVrm } from "./io/assets/vrm-import";
@@ -320,6 +321,7 @@ async function bootstrap(): Promise<void> {
   // window variant auto-opens on creation but is idempotent, so defensively call once more.
   quickControls.open();
 
+  const unsubscribeCueSync = wireCueLocaleSync(settingsStores);
   const unsubscribeLocale = subscribeLocale(() => {
     queueMicrotask(() => {
       quickControls.dispose();
@@ -350,6 +352,7 @@ async function bootstrap(): Promise<void> {
     // Runs first: disposing the controls commits dirty endpoint/key fields, which must still
     // reach the broadcast path and a live bridge.
     quickControls.dispose();
+    unsubscribeCueSync();
     unsubscribeLocale();
     unsubscribeVoiceRefresh();
     pushSocket.dispose();

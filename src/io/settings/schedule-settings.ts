@@ -29,13 +29,19 @@ export function defaultSettings(locale: CueLocale): ScheduleSettings {
 }
 
 export function createScheduleSettings(opts?: { storage?: ScheduleStorage; locale?: CueLocale }) {
-  return createCueListSettings<ScheduledCue>({
+  const store = createCueListSettings<ScheduledCue>({
     storage: opts?.storage,
     defaults: defaultSettings(opts?.locale ?? "ko"),
     extras: {
       time: { blank: "12:00", isValid: (v) => typeof v === "string" && TIME_RE.test(v) },
     },
   });
+  return {
+    ...store,
+    syncLocale(previous: CueLocale, next: CueLocale): void {
+      store.syncLocale(defaultSettings(previous), defaultSettings(next));
+    },
+  };
 }
 
 /** localStorage-backed ScheduleStorage adapter. Gracefully ignored where localStorage is unavailable. */
