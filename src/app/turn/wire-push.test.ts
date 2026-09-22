@@ -9,7 +9,9 @@ import { makeTurnOutput } from "../../dispatcher/test-helpers";
 import { createPushTurns } from "../../dispatcher/turn/push-turn";
 import { createTurnFeed, type TurnFeed } from "../../dispatcher/turn/turn-feed";
 import { createDelegationsStore } from "../../io/bridge/delegations-store";
+import type { ReasoningState } from "../../io/bridge/reasoning-store";
 import { createReasoningStore } from "../../io/bridge/reasoning-store";
+import type { BrokerPayload } from "../../io/chat/broker-client";
 import type { ChatHistoryEntry } from "../../io/chat/chat-history-store";
 import type {
   DelegationItem,
@@ -20,7 +22,26 @@ import type {
   ToolStatusFrame,
   TurnEndFrame,
 } from "../../io/chat/push-socket";
-import { wirePushMode, wirePushTransport, wireStopButton } from "./wire-push";
+import type {
+  MessageWindowMode,
+  MessageWindowSettings,
+} from "../../settings/panels/message-window-settings";
+
+const { createPushSocket } = vi.hoisted(() => ({ createPushSocket: vi.fn() }));
+const { createDelegationChip } = vi.hoisted(() => ({ createDelegationChip: vi.fn() }));
+vi.mock("../../io/chat/push-socket", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../io/chat/push-socket")>()),
+  createPushSocket,
+}));
+vi.mock("../../ui/chips/delegation-chip", () => ({ createDelegationChip }));
+
+import {
+  createDelegationChipMount,
+  wirePushMode,
+  wirePushStores,
+  wirePushTransport,
+  wireStopButton,
+} from "./wire-push";
 
 function fakeSocket() {
   let renderCb: ((frame: RenderFrame) => void) | null = null;
@@ -861,5 +882,183 @@ describe("wirePushMode", () => {
 
     expect(endpointsSettings.count()).toBe(0);
     expect(chatKeySettings.count()).toBe(0);
+  });
+});
+
+describe("wirePushStores", () => {
+  const PAYLOAD: BrokerPayload = {
+    emotionIds: ["happy"],
+    motionIds: ["wave"],
+    emotionText: { mode: "enum", table: { happy: "joy" } },
+  };
+
+  function fakeBridge() {
+    const cbs: Record<string, Array<(arg?: never) => void>> = {};
+    const on =
+      <T>(name: string) =>
+      (cb: (arg: T) => void) => {
+        (cbs[name] ??= []).push(cb as (arg?: never) => void);
+        return () => {
+          cbs[name] = cbs[name].filter((f) => f !== cb);
+        };
+      };
+    return {
+      cbs,
+      emitPushState: vi.fn(),
+      onPushState: on<PushSocketState>("pushState"),
+      emitPushStateAsk: vi.fn(),
+      onPushStateAsk: on<void>("pushStateAsk"),
+      emitPushReset: vi.fn(),
+      onPushReset: on<void>("pushReset"),
+      emitPushReconnect: vi.fn(),
+      onPushReconnect: on<void>("pushReconnect"),
+      emitDelegations: vi.fn(),
+      onDelegations: on<DelegationItem[]>("delegations"),
+      emitDelegationsAsk: vi.fn(),
+      onDelegationsAsk: on<void>("delegationsAsk"),
+      emitReasoning: vi.fn(),
+      onReasoning: on<ReasoningState>("reasoning"),
+      emitReasoningAsk: vi.fn(),
+      onReasoningAsk: on<void>("reasoningAsk"),
+    };
+  }
+
+  function wireStores() {
+    createPushSocket.mockReset();
+    createPushSocket.mockImplementation(() => ({
+      dispose: vi.fn(),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      reconnectNow: vi.fn(),
+      sendReset: vi.fn(() => true),
+      getState: vi.fn(() => ({ kind: "disconnected" as const })),
+      onState: vi.fn(() => () => {}),
+    }));
+    const bridge = fakeBridge();
+    const register = vi.fn();
+    const callsBefore = createPushSocket.mock.calls.length;
+    const stores = wirePushStores({
+      getEndpoints: () => ({ chat_base_url: "http://localhost:8646" }),
+      getChatKey: async () => undefined,
+      bridge,
+      register,
+    });
+    return {
+      stores,
+      register,
+      bridge,
+      socketDeps: createPushSocket.mock.calls[callsBefore][0],
+    };
+  }
+
+  it("serves an empty vocabulary until bind, then the bound one", () => {
+    const { stores, socketDeps } = wireStores();
+
+    expect(socketDeps.vocabulary()).toEqual({
+      emotion_ids: [],
+      motion_ids: [],
+      emotion_text_mode: "free",
+      emotion_text_map: {},
+    });
+
+    stores.bind({ vocabulary: () => PAYLOAD, stopTurn: () => {} });
+    expect(socketDeps.vocabulary()).toEqual({
+      emotion_ids: ["happy"],
+      motion_ids: ["wave"],
+      emotion_text_mode: "enum",
+      emotion_text_map: { happy: "joy" },
+    });
+  });
+
+  it("stops through the bridge's reset ask only once the stop is bound", () => {
+    const { stores, bridge } = wireStores();
+    const stop = vi.fn();
+
+    expect(() => stores.stopTurn()).not.toThrow();
+    for (const cb of bridge.cbs.pushReset ?? []) cb();
+    expect(stop).not.toHaveBeenCalled();
+
+    stores.bind({ vocabulary: () => PAYLOAD, stopTurn: stop });
+    bridge.cbs.pushReset![0]();
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("registers the socket, chat id, history, and the three publishers", () => {
+    const { register } = wireStores();
+
+    expect(register).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe("createDelegationChipMount", () => {
+  function setup(mode: MessageWindowMode) {
+    let modeNow: MessageWindowMode = mode;
+    const subs = new Set<(s: MessageWindowSettings) => void>();
+    const chip = {
+      el: {},
+      setSuppressed: vi.fn(),
+      closeList: vi.fn(),
+      onListOpen: vi.fn(() => () => {}),
+      dispose: vi.fn(),
+    };
+    createDelegationChip.mockReturnValue(chip);
+    const delegations = createDelegationsStore();
+    const mount = createDelegationChipMount({
+      mount: {} as HTMLElement,
+      store: delegations,
+      pushState: { getState: () => ({ kind: "disconnected" }), onState: () => () => {} },
+      onOpenSettings: () => {},
+      getMode: () => modeNow,
+      subscribeMode: (cb: (s: MessageWindowSettings) => void) => {
+        subs.add(cb);
+        return () => {
+          subs.delete(cb);
+        };
+      },
+    });
+    return {
+      mount,
+      chip,
+      delegations,
+      subs,
+      setMode(next: MessageWindowMode) {
+        modeNow = next;
+        for (const cb of subs) cb({ mode: modeNow, x: null, y: null });
+      },
+    };
+  }
+
+  it("begins suppressed while the mode is popped", () => {
+    const { mount, chip, delegations } = setup("popped");
+
+    mount.create();
+
+    expect(createDelegationChip).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ store: delegations, suppressed: true }),
+    );
+    expect(chip.setSuppressed).not.toHaveBeenCalled();
+  });
+
+  it("follows the message-window mode once created", () => {
+    const { mount, chip, setMode } = setup("docked");
+    mount.create();
+
+    setMode("popped");
+    expect(chip.setSuppressed).toHaveBeenLastCalledWith(true);
+
+    setMode("docked");
+    expect(chip.setSuppressed).toHaveBeenLastCalledWith(false);
+  });
+
+  it("removes the mode subscription and the resources on dispose, idempotently", () => {
+    const { mount, chip, subs } = setup("docked");
+    mount.create();
+
+    mount.dispose();
+    expect(chip.dispose).toHaveBeenCalledOnce();
+    expect(subs.size).toBe(0);
+
+    mount.dispose();
+    expect(chip.dispose).toHaveBeenCalledOnce();
   });
 });
