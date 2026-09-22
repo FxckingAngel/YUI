@@ -16,6 +16,8 @@ import aiohttp
 
 CLIENTS = {"yui-smoke-a": ["idle_lively", "dance"], "yui-smoke-b": ["idle_lively"]}
 ORDER = ["yui-smoke-a", "yui-smoke-b", "yui-smoke-a"]
+ACCEPTING_MARKER = "accepting clients on ws://"
+READY_MARKER = "Turn machinery warmed in "
 TEXT = (
     "This is a coding agent smoke-testing the YUI platform plugin on an isolated test gateway; "
     "no user is present. Answer in one short sentence and place one generate_express cue, "
@@ -34,6 +36,24 @@ def vocabulary(motions: list[str]) -> dict:
         "emotion_text_mode": "free",
         "emotion_text_map": {},
     }
+
+
+async def wait_for_gateway_ready(log: Path, timeout: float) -> None:
+    """Wait until startup restore has finished after the gateway began accepting clients."""
+    deadline = time.monotonic() + timeout
+    while True:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        accepting = max((index for index, line in enumerate(lines) if ACCEPTING_MARKER in line), default=-1)
+        warmed = max((index for index, line in enumerate(lines) if READY_MARKER in line), default=-1)
+        if accepting >= 0 and warmed > accepting:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"no '{READY_MARKER.strip()}' line after '{ACCEPTING_MARKER}' within {timeout:g}s; "
+                "the gateway's turn-machinery warm-up is disabled, failed, or still running"
+            )
+        await asyncio.sleep(min(0.1, remaining))
 
 
 async def run_turn(ws: aiohttp.ClientWebSocketResponse, chat: str, turn_id: str, timeout: float) -> bool:
@@ -93,7 +113,12 @@ def main() -> None:
     args = parser.parse_args()
     log = Path.home() / ".hermes" / "profiles" / args.profile / "logs" / "agent.log"
     start = log.stat().st_size
-    failures = asyncio.run(drive(f"ws://127.0.0.1:{args.port}/ws", args.key, args.timeout))
+
+    async def run() -> list[str]:
+        await wait_for_gateway_ready(log, args.timeout)
+        return await drive(f"ws://127.0.0.1:{args.port}/ws", args.key, args.timeout)
+
+    failures = asyncio.run(run())
     with log.open(encoding="utf-8", errors="replace") as f:
         f.seek(start)
         failures += check_log(f.readlines())
