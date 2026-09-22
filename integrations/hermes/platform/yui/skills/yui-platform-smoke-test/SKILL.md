@@ -86,8 +86,9 @@ Start it in the background:
 hermes gateway run -p <profile>
 ```
 
-Check: `grep "accepting clients on ws://127.0.0.1:<port>/ws" ~/.hermes/profiles/<profile>/logs/agent.log`
-prints a line. `could not bind` in that log means step 1's port is taken.
+Check: the log contains both `accepting clients on ws://127.0.0.1:<port>/ws` and a later
+`Turn machinery warmed in ...` line. The smoke script waits for the second line before opening
+clients. `could not bind` in that log means step 1's port is taken.
 
 ## 6. Run the smoke test
 
