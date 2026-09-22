@@ -1727,6 +1727,37 @@ async def test_a_send_with_the_same_windows_path_renders_only_the_unspoken_tail(
     assert "send does not continue the streamed text" not in caplog.text
 
 
+async def test_a_windows_path_that_is_no_file_stays_in_the_speech(client, adapter):
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, r"Open C:\Users\me\missing.md first. ")
+    assert await recv(ws) == speech_frame("777", r"Open C:\Users\me\missing.md first.")
+
+
+async def test_a_unc_path_is_never_looked_up(client, adapter, monkeypatch):
+    """A stat of \\\\host\\share opens an SMB session on Windows; the cleaner only takes drive paths."""
+    looked_up: list[str] = []
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: looked_up.append(p) or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, r"Try \\10.0.0.5\c$\x.md next. ")
+    assert await recv(ws) == speech_frame("777", r"Try \\10.0.0.5\c$\x.md next.")
+    assert not any(p.startswith("\\\\") for p in looked_up)
+
+
+async def test_a_send_that_is_only_a_windows_path_renders_nothing(client, adapter, caplog, monkeypatch):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == WIN_PATH or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    with caplog.at_level(logging.DEBUG):
+        await adapter.send(CHAT, WIN_PATH, metadata={"notify": True})
+    assert "nothing to render for this send" in caplog.text
+    await adapter.on_processing_complete(user_turn(adapter, "777"), ProcessingOutcome.SUCCESS)
+    assert await recv(ws) == {"type": "turn_end", "turn_id": "777"}
+
+
 async def test_a_client_that_reconnects_mid_answer_gets_the_rest_of_the_turn_in_its_render(client, adapter):
     """The text streamed while it was away never reaches the adapter under its chat."""
     ws = await ready(client)
