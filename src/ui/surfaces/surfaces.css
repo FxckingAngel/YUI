@@ -585,9 +585,10 @@
   background: var(--yui-danger);
 }
 
-/* Row — paperclip + field + error */
+/* Row — paperclip + field + controls, with errors beneath. */
 .yui-input__row {
   display: flex;
+  flex-wrap: wrap;
   /* Buttons ride the last line; the bottom margins re-center them on the one-line field (2.43rem). */
   align-items: flex-end;
 }
@@ -776,20 +777,21 @@
   }
 }
 
-/* Inline error (send failure) — no side-stripe, text color only */
+/* Inline error (send failure) — no side-stripe, text color only.
+   It takes a second flex line so its message and fix action cannot shrink the field. */
 .yui-input__error {
-  flex: 0 0 auto;
-  align-self: center;
-  padding-right: 0.6rem;
+  display: none;
+  order: 1;
+  flex: 1 0 100%;
+  min-width: 0;
+  padding: 0.1rem 0.6rem 0.45rem;
   color: var(--yui-danger);
   font-size: 0.78rem;
   font-weight: 500;
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity var(--yui-dur-fast) var(--yui-ease);
+  white-space: normal;
 }
 .yui-input.is-error .yui-input__error {
-  opacity: 1;
+  display: block;
 }
 
 /* In-place fix next to the error (e.g. open settings on an unconfigured backend).
