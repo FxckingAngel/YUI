@@ -53,7 +53,8 @@ CLOSE_REPLACED = 4409
 
 # A run the gateway starts on its own still names a turn; the client's ids are decimal digits only.
 _TURN_IDS = itertools.count(1)
-_WINDOWS_PATH_RE = re.compile(r"(?<!\S)(?:[A-Za-z]:\\|\\\\)[^\r\n]*?(?=\s|$)")
+# Drive paths only: a UNC candidate would make os.path.isfile open an SMB session on Windows.
+_WINDOWS_PATH_RE = re.compile(r"(?<!\S)[A-Za-z]:\\[^\r\n]*?(?=\s|$)")
 
 
 def _mint_turn_id() -> str:
@@ -622,11 +623,11 @@ class YuiAdapter(BasePlatformAdapter):
 
     async def _deliver(self, chat_id: str, content: str, meta: dict) -> SendResult:
         """Render a reply; only the gateway's own markers keep a send off the wire."""
-        content = _strip_windows_local_files(content or "")
         if meta.get(NOTICE_MARKER):
             logger.info("yui: gateway notice not spoken chat=%s", chat_id)
             return SendResult(success=True, message_id=_message_id())
-        if not (content or "").strip() or any(meta.get(marker) for marker in INTERIM_MARKERS):
+        content = _strip_windows_local_files(content)
+        if not content.strip() or any(meta.get(marker) for marker in INTERIM_MARKERS):
             logger.debug("yui: nothing to render for this send chat=%s", chat_id)
             return SendResult(success=True, message_id=_message_id())
         if state.take_muted(chat_id):
