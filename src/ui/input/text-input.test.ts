@@ -668,6 +668,25 @@ describe("showInputError — inline fix affordance", () => {
     expect(errorEl().textContent).toBe("later");
   });
 
+  it("shows the alert before filling it, so the live region announces the message", () => {
+    // Content inserted while the span is display: none is outside the accessibility tree.
+    const el = errorEl();
+    const proto = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!;
+    let shownAtWrite: boolean | undefined;
+    Object.defineProperty(el, "textContent", {
+      configurable: true,
+      get: proto.get,
+      set(value: string) {
+        shownAtWrite = el.closest(".yui-input")!.classList.contains("is-error");
+        proto.set!.call(el, value);
+      },
+    });
+
+    s.showInputError("boom");
+
+    expect(shownAtWrite).toBe(true);
+  });
+
   it("clears the action button when a closed input is summoned after an error", () => {
     s.showInputError("boom", { label: "Open settings", onClick: vi.fn() });
     s.summonInput();
@@ -682,7 +701,7 @@ describe("input error layout", () => {
 
     expect(css).toMatch(/\.yui-input__row\s*\{[\s\S]*?flex-wrap:\s*wrap;/);
     expect(css).toMatch(
-      /\.yui-input__error\s*\{[\s\S]*?display:\s*none;[\s\S]*?order:\s*1;[\s\S]*?flex:\s*1\s+0\s+100%;[\s\S]*?white-space:\s*normal;/,
+      /\.yui-input__error\s*\{[\s\S]*?display:\s*none;[\s\S]*?order:\s*1;[\s\S]*?flex:\s*1\s+0\s+100%;[\s\S]*?box-sizing:\s*border-box;[\s\S]*?white-space:\s*normal;/,
     );
     expect(css).toMatch(/\.yui-input\.is-error\s+\.yui-input__error\s*\{[\s\S]*?display:\s*block;/);
   });
