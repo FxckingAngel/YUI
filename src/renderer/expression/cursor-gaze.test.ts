@@ -148,6 +148,34 @@ describe("createCursorGaze — step()", () => {
     expect(vrm.lookAt!.yaw !== 0 || vrm.lookAt!.pitch !== 0).toBe(true);
   });
 
+  it("cursor straight above the head makes her look up, not down", () => {
+    const { vrm, head, camera } = makeFixture();
+    const gaze = createCursorGaze({
+      camera,
+      getVrm: () => vrm,
+      gaze: GAZE,
+      log: noopLog,
+      mountWidth: () => 800,
+      mountHeight: () => 600,
+    });
+    gaze.onVrmLoaded(vrm);
+    // Straight above the head (same x as its screen projection) -> zero yaw, isolating pitch.
+    gaze.setCursorCss({ x: HEAD_CSS.x, y: -900 });
+
+    for (let i = 0; i < 120; i++) {
+      head.quaternion.identity();
+      gaze.step(0.05);
+    }
+
+    // three-vrm's own convention (VRMLookAt): positive pitch looks down, negative looks up.
+    expect(vrm.lookAt!.pitch).toBeLessThan(0);
+
+    // The head bone must tilt the same way: its local forward (0,0,1) should gain a
+    // positive Y component (tips up), not a negative one (tips down).
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(head.quaternion);
+    expect(forward.y).toBeGreaterThan(0);
+  });
+
   it("cursor null eases the damped state back toward neutral instead of snapping", () => {
     const { vrm, head, camera } = makeFixture();
     const gaze = createCursorGaze({
