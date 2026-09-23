@@ -166,21 +166,25 @@ export function createCursorGaze(deps: CursorGazeDeps): CursorGaze {
     if (!adv.active) return; // settled at neutral — leave the motion/eyes untouched.
 
     try {
+      // gazeState pitch keeps this module's own convention (positive = look up, see
+      // cursorToResidual). Both the bone Euler's X axis and VRMLookAt.pitch use the opposite
+      // convention (positive = look down -- spinning the forward vector CCW around +X tips it
+      // down), so every write-out here negates pitch to cross into that convention.
       const hasNeck = gazeNeckBone !== null;
       const yawSplit = splitHeadNeck(gazeState.headYaw, gazeConfig.headNeckSplit, hasNeck);
       const pitchSplit = splitHeadNeck(gazeState.headPitch, gazeConfig.headNeckSplit, hasNeck);
       if (gazeNeckBone) {
-        gazeDeltaEuler.set(pitchSplit.neck * DEG2RAD, yawSplit.neck * DEG2RAD, 0, "YXZ");
+        gazeDeltaEuler.set(-pitchSplit.neck * DEG2RAD, yawSplit.neck * DEG2RAD, 0, "YXZ");
         gazeNeckBone.quaternion.multiply(gazeDeltaQuat.setFromEuler(gazeDeltaEuler));
       }
       if (gazeHeadBone) {
-        gazeDeltaEuler.set(pitchSplit.head * DEG2RAD, yawSplit.head * DEG2RAD, 0, "YXZ");
+        gazeDeltaEuler.set(-pitchSplit.head * DEG2RAD, yawSplit.head * DEG2RAD, 0, "YXZ");
         gazeHeadBone.quaternion.multiply(gazeDeltaQuat.setFromEuler(gazeDeltaEuler));
       }
       // Eyes — applied inside vrm.update (after the head nudge is copied to raw bones).
       if (gazeLookAtReady && currentVrm.lookAt) {
         currentVrm.lookAt.yaw = gazeState.eyeYaw;
-        currentVrm.lookAt.pitch = gazeState.eyePitch;
+        currentVrm.lookAt.pitch = -gazeState.eyePitch;
       }
     } catch (err) {
       log.error("step_gaze_apply", { error: String(err) });
