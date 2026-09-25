@@ -79,9 +79,16 @@ interface Fixture {
   camera: THREE.PerspectiveCamera;
 }
 
-/** Head/neck bones on an unrotated scene + a camera looking straight at the head. */
-function makeFixture(headPos = new THREE.Vector3(0, 1.5, 0)): Fixture {
+/** Head/neck bones on a scene (turned by π for VRM 0.x, as rotateVRM0 does) + a camera looking straight at the head. */
+function makeFixture({
+  metaVersion = "1",
+  headPos = new THREE.Vector3(0, 1.5, 0),
+}: {
+  metaVersion?: "0" | "1";
+  headPos?: THREE.Vector3;
+} = {}): Fixture {
   const scene = new THREE.Group();
+  if (metaVersion === "0") scene.rotation.y = Math.PI;
   const head = new THREE.Object3D();
   head.position.copy(headPos);
   const neck = new THREE.Object3D();
@@ -96,6 +103,7 @@ function makeFixture(headPos = new THREE.Vector3(0, 1.5, 0)): Fixture {
         name === "head" ? head : name === "neck" ? neck : null,
     },
     lookAt,
+    meta: { metaVersion },
   } as unknown as VRM;
 
   const camera = new THREE.PerspectiveCamera(90, 800 / 600, 0.1, 100);
@@ -173,6 +181,31 @@ describe("createCursorGaze — step()", () => {
     // The head bone must tilt the same way: its local forward (0,0,1) should gain a
     // positive Y component (tips up), not a negative one (tips down).
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(head.quaternion);
+    expect(forward.y).toBeGreaterThan(0);
+  });
+
+  it("cursor straight above the head makes a VRM 0.x model look up too", () => {
+    const { vrm, head, camera } = makeFixture({ metaVersion: "0" });
+    const gaze = createCursorGaze({
+      camera,
+      getVrm: () => vrm,
+      gaze: GAZE,
+      log: noopLog,
+      mountWidth: () => 800,
+      mountHeight: () => 600,
+    });
+    gaze.onVrmLoaded(vrm);
+    gaze.setCursorCss({ x: HEAD_CSS.x, y: -900 });
+
+    for (let i = 0; i < 120; i++) {
+      head.quaternion.identity();
+      gaze.step(0.05);
+    }
+
+    expect(vrm.lookAt!.pitch).toBeLessThan(0);
+
+    // A VRM 0.x model faces -Z natively, so its forward is (0,0,-1).
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(head.quaternion);
     expect(forward.y).toBeGreaterThan(0);
   });
 
