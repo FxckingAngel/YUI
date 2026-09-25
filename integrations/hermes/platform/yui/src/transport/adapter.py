@@ -54,7 +54,7 @@ CLOSE_REPLACED = 4409
 # A run the gateway starts on its own still names a turn; the client's ids are decimal digits only.
 _TURN_IDS = itertools.count(1)
 # Drive paths only: a UNC candidate would make os.path.isfile open an SMB session on Windows.
-_WINDOWS_PATH_RE = re.compile(r"(?<!\S)[A-Za-z]:\\[^\r\n]*?(?=\s|$)")
+_WINDOWS_PATH_RE = re.compile(r"(?<!\S)[A-Za-z]:\\(?:(?!\s[A-Za-z]:\\)[^\r\n])*")
 
 
 def _mint_turn_id() -> str:
@@ -90,10 +90,14 @@ def _strip_windows_local_files(text: str) -> str:
 
     def replace(match: re.Match[str]) -> str:
         raw = match.group(0)
-        candidate = raw.rstrip(".,;:!?)]")
-        if not candidate or not os.path.isfile(candidate):
-            return raw
-        return raw[len(candidate) :]
+        # Try the longest cut first, but only at word ends: one stat per word, not per character.
+        ends = [m.start() for m in re.finditer(r"\s", raw)] + [len(raw)]
+        # ponytail: only the first 8 word ends are tried; a path with 8 or more spaces stays in the speech.
+        for end in reversed(ends[:8]):
+            candidate = raw[:end].rstrip(".,;:!?)]")
+            if candidate and os.path.isfile(candidate):
+                return raw[len(candidate) :]
+        return raw
 
     cleaned = _WINDOWS_PATH_RE.sub(replace, text)
     return cleaned.strip() if cleaned != text else cleaned

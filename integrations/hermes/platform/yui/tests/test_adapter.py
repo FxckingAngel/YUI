@@ -1709,6 +1709,17 @@ async def test_a_streamed_sentence_leaves_without_the_windows_path_the_gateways_
     assert await recv(ws) == speech_frame("777", "Want the summary?")
 
 
+async def test_a_windows_path_with_spaces_is_removed_from_speech(client, adapter, monkeypatch):
+    spaced = r"C:\Users\yui\Program Files\audit.md"
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == spaced or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, f"The report is at {spaced}. Want the summary? ")
+    assert await recv(ws) == speech_frame("777", "The report is at .")
+    assert await recv(ws) == speech_frame("777", "Want the summary?")
+
+
 async def test_a_send_with_the_same_windows_path_renders_only_the_unspoken_tail(
     client, adapter, caplog, monkeypatch
 ):
@@ -1725,6 +1736,48 @@ async def test_a_send_with_the_same_windows_path_renders_only_the_unspoken_tail(
         )
     assert await recv(ws) == render_frame("777", [{"cues": [], "speech": "It is short."}])
     assert "send does not continue the streamed text" not in caplog.text
+
+
+async def test_a_missing_windows_path_does_not_hide_a_later_existing_one(client, adapter, monkeypatch):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == r"C:\exists.txt" or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, r"Copy C:\missing.txt to C:\exists.txt now. ")
+    assert await recv(ws) == speech_frame("777", r"Copy C:\missing.txt to  now.")
+
+
+async def test_a_send_after_a_missing_and_an_existing_windows_path_renders_only_the_unspoken_tail(
+    client, adapter, caplog, monkeypatch
+):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == r"C:\exists.txt" or real_isfile(p))
+    streamed = r"Skip C:\missing.txt now. Saved to C:\exists.txt. More? "
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await stream(adapter, streamed)
+    assert await recv(ws) == speech_frame("777", r"Skip C:\missing.txt now.")
+    assert await recv(ws) == speech_frame("777", "Saved to .")
+    assert await recv(ws) == speech_frame("777", "More?")
+    with caplog.at_level(logging.INFO):
+        await adapter.send(CHAT, f"{streamed}Done.", metadata={"notify": True})
+    assert await recv(ws) == render_frame("777", [{"cues": [], "speech": "Done."}])
+    assert "send does not continue the streamed text" not in caplog.text
+
+
+async def test_a_send_removes_a_windows_path_followed_by_many_words(client, adapter, monkeypatch):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == WIN_PATH or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await adapter.send(
+        CHAT,
+        f"See {WIN_PATH} for the notes on one two three four five six seven eight nine.",
+        metadata={"notify": True},
+    )
+    assert await recv(ws) == render_frame(
+        "777", [{"cues": [], "speech": "See  for the notes on one two three four five six seven eight nine."}]
+    )
 
 
 async def test_a_windows_path_that_is_no_file_stays_in_the_speech(client, adapter):
