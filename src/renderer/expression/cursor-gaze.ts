@@ -102,6 +102,8 @@ export function createCursorGaze(deps: CursorGazeDeps): CursorGaze {
   // Cached head/neck bones for the per-frame nudge (refreshed on load; no per-frame lookup).
   let gazeHeadBone: THREE.Object3D | null = null;
   let gazeNeckBone: THREE.Object3D | null = null;
+  // The bone pitch sign follows the model's native facing (VRM 0.x faces -Z).
+  let bonePitchSign = -1;
   // True once the loaded VRM's lookAt has been claimed (autoUpdate off) for eye control.
   let gazeLookAtReady = false;
   // Latest window-local CSS px cursor position; null = unavailable.
@@ -170,17 +172,28 @@ export function createCursorGaze(deps: CursorGazeDeps): CursorGaze {
       const yawSplit = splitHeadNeck(gazeState.headYaw, gazeConfig.headNeckSplit, hasNeck);
       const pitchSplit = splitHeadNeck(gazeState.headPitch, gazeConfig.headNeckSplit, hasNeck);
       if (gazeNeckBone) {
-        gazeDeltaEuler.set(pitchSplit.neck * DEG2RAD, yawSplit.neck * DEG2RAD, 0, "YXZ");
+        gazeDeltaEuler.set(
+          bonePitchSign * pitchSplit.neck * DEG2RAD,
+          yawSplit.neck * DEG2RAD,
+          0,
+          "YXZ",
+        );
         gazeNeckBone.quaternion.multiply(gazeDeltaQuat.setFromEuler(gazeDeltaEuler));
       }
       if (gazeHeadBone) {
-        gazeDeltaEuler.set(pitchSplit.head * DEG2RAD, yawSplit.head * DEG2RAD, 0, "YXZ");
+        gazeDeltaEuler.set(
+          bonePitchSign * pitchSplit.head * DEG2RAD,
+          yawSplit.head * DEG2RAD,
+          0,
+          "YXZ",
+        );
         gazeHeadBone.quaternion.multiply(gazeDeltaQuat.setFromEuler(gazeDeltaEuler));
       }
       // Eyes — applied inside vrm.update (after the head nudge is copied to raw bones).
       if (gazeLookAtReady && currentVrm.lookAt) {
         currentVrm.lookAt.yaw = gazeState.eyeYaw;
-        currentVrm.lookAt.pitch = gazeState.eyePitch;
+        // This module's pitch is positive up; three-vrm's lookAt pitch is positive down.
+        currentVrm.lookAt.pitch = -gazeState.eyePitch;
       }
     } catch (err) {
       log.error("step_gaze_apply", { error: String(err) });
@@ -191,6 +204,7 @@ export function createCursorGaze(deps: CursorGazeDeps): CursorGaze {
     // Cache head/neck for the per-frame gaze nudge; claim lookAt for eye control.
     gazeHeadBone = vrm.humanoid?.getNormalizedBoneNode("head") ?? null;
     gazeNeckBone = vrm.humanoid?.getNormalizedBoneNode("neck") ?? null;
+    bonePitchSign = vrm.meta?.metaVersion === "0" ? 1 : -1;
     gazeState = { ...NEUTRAL_GAZE };
     gazeConverging = false;
     gazeLookAtReady = vrm.lookAt != null;
@@ -201,6 +215,7 @@ export function createCursorGaze(deps: CursorGazeDeps): CursorGaze {
     // Drop gaze bone refs + reset damped state so nothing carries to the next VRM.
     gazeHeadBone = null;
     gazeNeckBone = null;
+    bonePitchSign = -1;
     gazeLookAtReady = false;
     gazeState = { ...NEUTRAL_GAZE };
     gazeConverging = false;

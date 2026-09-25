@@ -79,9 +79,16 @@ interface Fixture {
   camera: THREE.PerspectiveCamera;
 }
 
-/** Head/neck bones on an unrotated scene + a camera looking straight at the head. */
-function makeFixture(headPos = new THREE.Vector3(0, 1.5, 0)): Fixture {
+/** Head/neck bones on a scene (turned by π for VRM 0.x, as rotateVRM0 does) + a camera looking straight at the head. */
+function makeFixture({
+  metaVersion = "1",
+  headPos = new THREE.Vector3(0, 1.5, 0),
+}: {
+  metaVersion?: "0" | "1";
+  headPos?: THREE.Vector3;
+} = {}): Fixture {
   const scene = new THREE.Group();
+  if (metaVersion === "0") scene.rotation.y = Math.PI;
   const head = new THREE.Object3D();
   head.position.copy(headPos);
   const neck = new THREE.Object3D();
@@ -96,6 +103,7 @@ function makeFixture(headPos = new THREE.Vector3(0, 1.5, 0)): Fixture {
         name === "head" ? head : name === "neck" ? neck : null,
     },
     lookAt,
+    meta: { metaVersion },
   } as unknown as VRM;
 
   const camera = new THREE.PerspectiveCamera(90, 800 / 600, 0.1, 100);
@@ -146,6 +154,59 @@ describe("createCursorGaze — step()", () => {
     const total = quaternionAngleDeg(head.quaternion) + quaternionAngleDeg(neck.quaternion);
     expect(total).toBeGreaterThan(10);
     expect(vrm.lookAt!.yaw !== 0 || vrm.lookAt!.pitch !== 0).toBe(true);
+  });
+
+  it("cursor straight above the head makes her look up, not down", () => {
+    const { vrm, head, camera } = makeFixture();
+    const gaze = createCursorGaze({
+      camera,
+      getVrm: () => vrm,
+      gaze: GAZE,
+      log: noopLog,
+      mountWidth: () => 800,
+      mountHeight: () => 600,
+    });
+    gaze.onVrmLoaded(vrm);
+    // Straight above the head (same x as its screen projection) -> zero yaw, isolating pitch.
+    gaze.setCursorCss({ x: HEAD_CSS.x, y: -900 });
+
+    for (let i = 0; i < 120; i++) {
+      head.quaternion.identity();
+      gaze.step(0.05);
+    }
+
+    // three-vrm's own convention (VRMLookAt): positive pitch looks down, negative looks up.
+    expect(vrm.lookAt!.pitch).toBeLessThan(0);
+
+    // The head bone must tilt the same way: its local forward (0,0,1) should gain a
+    // positive Y component (tips up), not a negative one (tips down).
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(head.quaternion);
+    expect(forward.y).toBeGreaterThan(0);
+  });
+
+  it("cursor straight above the head makes a VRM 0.x model look up too", () => {
+    const { vrm, head, camera } = makeFixture({ metaVersion: "0" });
+    const gaze = createCursorGaze({
+      camera,
+      getVrm: () => vrm,
+      gaze: GAZE,
+      log: noopLog,
+      mountWidth: () => 800,
+      mountHeight: () => 600,
+    });
+    gaze.onVrmLoaded(vrm);
+    gaze.setCursorCss({ x: HEAD_CSS.x, y: -900 });
+
+    for (let i = 0; i < 120; i++) {
+      head.quaternion.identity();
+      gaze.step(0.05);
+    }
+
+    expect(vrm.lookAt!.pitch).toBeLessThan(0);
+
+    // A VRM 0.x model faces -Z natively, so its forward is (0,0,-1).
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(head.quaternion);
+    expect(forward.y).toBeGreaterThan(0);
   });
 
   it("cursor null eases the damped state back toward neutral instead of snapping", () => {
