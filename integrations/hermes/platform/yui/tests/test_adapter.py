@@ -1765,6 +1765,21 @@ async def test_a_send_after_a_missing_and_an_existing_windows_path_renders_only_
     assert "send does not continue the streamed text" not in caplog.text
 
 
+async def test_a_send_removes_a_windows_path_followed_by_many_words(client, adapter, monkeypatch):
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == WIN_PATH or real_isfile(p))
+    ws = await ready(client)
+    await adapter.on_processing_start(user_turn(adapter, "777"))
+    await adapter.send(
+        CHAT,
+        f"See {WIN_PATH} for the notes on one two three four five six seven eight nine.",
+        metadata={"notify": True},
+    )
+    assert await recv(ws) == render_frame(
+        "777", [{"cues": [], "speech": "See  for the notes on one two three four five six seven eight nine."}]
+    )
+
+
 async def test_a_windows_path_that_is_no_file_stays_in_the_speech(client, adapter):
     ws = await ready(client)
     await adapter.on_processing_start(user_turn(adapter, "777"))
