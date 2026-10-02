@@ -84,6 +84,9 @@ export function isChatConfigured(cfg: Pick<EndpointsConfig, "chat_base_url">): b
 
 export type { TurnFailure, TurnOutcome } from "./turn-outcome";
 
+/** Server-side HTTP error detail for a failed turn — bare body message, no wrapper. */
+export type TurnErrorDetail = { status: number; message: string };
+
 /** Adds the streaming path's own deps to the set the push path declares, so each field is declared once. */
 interface BackendCallerDeps extends PushCallDeps {
   /** chat endpoint config. */
@@ -130,8 +133,14 @@ export interface BackendCaller {
   /**
    * Execute B1–B5 for one admitted turn. In-flight aborted if externalSignal aborts.
    * Never throws — failures expressed as a TurnOutcome failure value (dispatcher branches).
+   * A stream error carrying an HTTP status invokes onErrorDetail with {status, bare server
+   * message} before the failure outcome resolves.
    */
-  call(turn: Turn, externalSignal?: AbortSignal): Promise<TurnOutcome>;
+  call(
+    turn: Turn,
+    externalSignal?: AbortSignal,
+    onErrorDetail?: (detail: TurnErrorDetail) => void,
+  ): Promise<TurnOutcome>;
 }
 
 export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
@@ -139,7 +148,11 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
   const stream = deps.stream ?? streamChat;
   const pushCall = createPushCall(deps, log);
 
-  async function call(turn: Turn, externalSignal?: AbortSignal): Promise<TurnOutcome> {
+  async function call(
+    turn: Turn,
+    externalSignal?: AbortSignal,
+    onErrorDetail?: (detail: TurnErrorDetail) => void,
+  ): Promise<TurnOutcome> {
     const env = turn.trigger;
     // Push mode sends the turn on the socket and holds the call open until its first render.
     const isPush = deps.config.chat_api === "push";
@@ -395,7 +408,7 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
           return "network_stall";
         }
 
-        if (streamError) {
+        if (streamError !== undefined) {
           // If delta arrived, clean up speech bubble/audio — prevent getting stuck forever without next turn.
           if (streamedAny) deps.turnOutput?.abort();
           // Distinguish auth-ish (401/403) status as http_4xx_drop — keep other 4xx/5xx/no-status as network_drop.
@@ -433,6 +446,10 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
             message: streamError,
             status: streamErrorStatus,
           });
+          // Server answered with an HTTP error — carry its status + message to the UI surface.
+          if (streamErrorStatus !== undefined) {
+            onErrorDetail?.({ status: streamErrorStatus, message: streamError });
+          }
           return "network_drop";
         }
 

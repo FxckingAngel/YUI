@@ -220,7 +220,7 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
     callDeferred[0].resolve("network_drop");
     await vi.advanceTimersByTimeAsync(20);
     expect(sink).toHaveBeenCalledTimes(1);
-    expect(sink).toHaveBeenCalledWith("network_drop", "text");
+    expect(sink).toHaveBeenCalledWith("network_drop", "text", undefined);
     d.stop();
   });
 
@@ -232,7 +232,7 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
     callDeferred[0].resolve("parse_error");
     await vi.advanceTimersByTimeAsync(20);
     expect(sink).toHaveBeenCalledTimes(1);
-    expect(sink).toHaveBeenCalledWith("parse_error", "voice");
+    expect(sink).toHaveBeenCalledWith("parse_error", "voice", undefined);
     d.stop();
   });
 
@@ -243,7 +243,37 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
     await vi.advanceTimersByTimeAsync(20);
     callDeferred[0].resolve("http_4xx_drop");
     await vi.advanceTimersByTimeAsync(20);
-    expect(sink).toHaveBeenCalledWith("http_4xx_drop", "text");
+    expect(sink).toHaveBeenCalledWith("http_4xx_drop", "text", undefined);
+    d.stop();
+  });
+
+  it("hands the server error detail to onUserTurnFailed as its third argument", async () => {
+    const sink = vi.fn();
+    const failingCaller: BackendCaller = {
+      call: (_turn, _signal, onErrorDetail) => {
+        onErrorDetail?.({ status: 400, message: "model does not support tools" });
+        return Promise.resolve("network_drop");
+      },
+    };
+    const d = createDispatcher({
+      bus,
+      renderer: renderer as never,
+      peekConfig: () => PEEK_CONFIG,
+      tapConfig: () => TAP_CONFIG,
+      backendCaller: failingCaller,
+      guardrails,
+      turnLog,
+      hasOutstandingSpeech: () => speaking,
+      logger,
+      onUserTurnFailed: sink,
+    });
+    d.start();
+    bus.push(env({ event_name: "user.text_submitted" }));
+    await vi.advanceTimersByTimeAsync(20);
+    expect(sink).toHaveBeenCalledWith("network_drop", "text", {
+      status: 400,
+      message: "model does not support tools",
+    });
     d.stop();
   });
 
