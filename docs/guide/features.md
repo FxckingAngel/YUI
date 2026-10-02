@@ -32,7 +32,7 @@ Everything YUI does today, grouped by area. The README shows the three headline 
 | Text input | Text box with up to 6 image attachments by paste, drag-and-drop, or file picker |
 | Voice input | Silero VAD speech detection, transcription on any OpenAI-compatible STT endpoint, and barge-in over her speech |
 | Voice output | Sentence-by-sentence TTS with the `emotion_text` voice tag ([vocabulary](../reference/tts-emotion/)), and a voice list from the TTS server with import of your own reference clip |
-| Waiting filler | Thinking motion and short localized lines while a reply is pending, including tool-specific lines (`configs/filler.json`) |
+| Waiting filler | Thinking motion and short localized lines while a reply is pending, including tool-specific lines, and a spoken line when a turn times out or the backend can't be reached. Defaults come from `configs/filler.json`; every list is editable per language under Settings → **Talk** → **Thinking interjections** (**More phrases** for the long-wait, timeout, connection-lost, and tool lines) |
 | History and message window | History tab stored on the device, and an optional separate message window |
 
 ## Backend
@@ -75,5 +75,5 @@ Everything YUI does today, grouped by area. The README shows the three headline 
 | Languages | English, Japanese, and Korean UI, with the OS language as the first-run default |
 | Configuration | Runtime settings in `configs/`, validated at load, with hot-reload in development |
 | Logs | One log file per day shared by frontend and Rust lines ([location](https://github.com/yw0nam/YUI/blob/main/docs/agent-guide/build-run.md#logs), [convention](../reference/logging.md)) |
-| Platforms | macOS on Apple Silicon, and experimental Windows x64 builds |
+| Platforms | macOS on Apple Silicon (official) and experimental Windows x64 builds; Intel Mac and Linux are not officially supported |
 
