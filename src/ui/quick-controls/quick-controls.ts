@@ -140,6 +140,10 @@ interface QuickControlsOptions {
   removeVoice: (id: string) => Promise<void>;
   /** Whether the TTS provider takes imported voices — gates import, delete and re-upload. */
   canManageVoices: () => boolean;
+  /** Whether the TTS provider takes a clip again under the voice's own id — gates re-upload. */
+  canReuploadVoices: () => boolean;
+  /** On shows the speaker list's paste-id field. */
+  canPasteVoiceId: () => boolean;
   /** Refetches the TTS server's voice list on panel open (the server may come up after the app). Fire-and-forget. */
   refreshVoiceList?: () => void;
   onGainPreview: (mouthOpen: number) => void;
@@ -255,6 +259,8 @@ export function createQuickControls({
   commitVoiceImport,
   removeVoice,
   canManageVoices,
+  canReuploadVoices,
+  canPasteVoiceId,
   refreshVoiceList,
   onGainPreview,
   onGainPreviewEnd,
@@ -507,6 +513,8 @@ export function createQuickControls({
     commitVoiceImport,
     removeVoice,
     canManageVoices,
+    canReuploadVoices,
+    canPasteVoiceId,
     log,
     refreshTooltip: hintTooltip.refresh,
     isDisposed: () => disposed,

@@ -1,23 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpeakerOption } from "./speaker-selection";
 
-const { listVoices, selectFetch } = vi.hoisted(() => ({
+const { listVoices, listFishVoices, selectFetch } = vi.hoisted(() => ({
   listVoices: vi.fn<(o: unknown) => Promise<string[] | null>>().mockResolvedValue([]),
+  listFishVoices: vi
+    .fn<(o: unknown) => Promise<Array<{ id: string; label?: string }> | null>>()
+    .mockResolvedValue([]),
   selectFetch: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("./tts-voices", () => ({ listVoices, upsertVoice: vi.fn(), deleteVoice: vi.fn() }));
+vi.mock("./fish-voices", () => ({
+  listFishVoices,
+  upsertFishVoice: vi.fn(),
+  deleteFishVoice: vi.fn(),
+}));
 vi.mock("../../chat/chat-client", () => ({ selectFetch }));
 
 import { createVoiceListRefresh, wireVoiceListAutoRefresh } from "./voice-list-refresh";
 
 const noopLog = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-/** Minimal stand-in for the speaker store — only the two methods the refresher touches. */
+/** Minimal stand-in for the speaker store — only the methods the refresher touches. */
 function fakeStore(userOptions: SpeakerOption[] = []) {
   const setManifest = vi.fn();
   return {
     listUser: () => userOptions,
     setManifest,
+    setOwner: vi.fn(),
     _manifest: () => setManifest.mock.calls.at(-1)?.[0],
   };
 }
@@ -66,7 +75,6 @@ describe("createVoiceListRefresh", () => {
         { id: "あやせ", label: "あやせ", ref_url: "" },
       ],
       defaultValue: "ナツメ",
-      hideUser: false,
     });
   });
 
@@ -105,7 +113,13 @@ describe("createVoiceListRefresh", () => {
   it("excludes ids already owned by a user option so the richer user record stays authoritative", async () => {
     listVoices.mockResolvedValue(["ナツメ", "myvoice"]);
     const store = fakeStore([
-      { id: "myvoice", label: "My Voice", ref_url: "asset://x/clip.mp3", source: "user" },
+      {
+        id: "myvoice",
+        label: "My Voice",
+        ref_url: "asset://x/clip.mp3",
+        source: "user",
+        provider: "irodori",
+      },
     ]);
     const refresh = createVoiceListRefresh({
       getEndpoints: () => ({ tts_base_url: "http://localhost:8091" }),
@@ -165,7 +179,13 @@ describe("createVoiceListRefresh — openai", () => {
     listVoices.mockClear();
     const reuploadUserVoice = vi.fn();
     const store = fakeStore([
-      { id: "myvoice", label: "My Voice", ref_url: "asset://x/clip.mp3", source: "user" },
+      {
+        id: "myvoice",
+        label: "My Voice",
+        ref_url: "asset://x/clip.mp3",
+        source: "user",
+        provider: "irodori",
+      },
     ]);
     const refresh = createVoiceListRefresh({
       getEndpoints: () => ({ tts_base_url: "https://api.openai.com", tts_provider: "openai" }),
@@ -196,6 +216,81 @@ describe("createVoiceListRefresh — openai", () => {
   });
 });
 
+describe("createVoiceListRefresh — provider-owned user voices", () => {
+  const clip = (id: string, provider: "irodori" | "fish"): SpeakerOption => ({
+    id,
+    label: id,
+    ref_url: `asset://x/${id}.wav`,
+    source: "user",
+    provider,
+  });
+
+  it("scopes the store to the live provider before the list request", async () => {
+    let release: (ids: string[]) => void = () => {};
+    listVoices.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const store = fakeStore();
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "http://a" }),
+      speakerSelection: store,
+      log: noopLog,
+    });
+
+    const pending = refresh();
+    await vi.waitFor(() => expect(listVoices).toHaveBeenCalled());
+    expect(store.setOwner).toHaveBeenCalledWith("irodori");
+    release([]);
+    await pending;
+  });
+
+  it("re-uploads only the live provider's own lost clips", async () => {
+    listVoices.mockResolvedValue([]);
+    const reuploadUserVoice = vi.fn().mockResolvedValue(undefined);
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "http://a", tts_provider: "irodori" }),
+      speakerSelection: fakeStore([clip("mine", "irodori"), clip("fishvoice", "fish")]),
+      reuploadUserVoice,
+      log: noopLog,
+    });
+
+    await refresh();
+
+    expect(reuploadUserVoice.mock.calls.map(([o]) => o.id)).toEqual(["mine"]);
+  });
+
+  it("never re-uploads under a provider whose upload names a new voice", async () => {
+    listFishVoices.mockResolvedValue([]);
+    const reuploadUserVoice = vi.fn().mockResolvedValue(undefined);
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "https://api.fish.audio", tts_provider: "fish" }),
+      speakerSelection: fakeStore([clip("mine", "irodori"), clip("fishvoice", "fish")]),
+      reuploadUserVoice,
+      log: noopLog,
+    });
+
+    await refresh();
+
+    expect(reuploadUserVoice).not.toHaveBeenCalled();
+  });
+
+  it("keeps a server voice listed when only another provider's user voice shares its id", async () => {
+    listVoices.mockResolvedValue(["shared"]);
+    const store = fakeStore([clip("shared", "fish")]);
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "http://a", tts_provider: "irodori" }),
+      speakerSelection: store,
+      log: noopLog,
+    });
+
+    await refresh();
+
+    expect(store._manifest().available.map((o: SpeakerOption) => o.id)).toEqual(["shared"]);
+  });
+});
+
 describe("createVoiceListRefresh — provider switch", () => {
   it("clears the previous provider's voices when the new provider's list fails", async () => {
     let provider: "irodori" | "openai" = "openai";
@@ -211,7 +306,7 @@ describe("createVoiceListRefresh — provider switch", () => {
     listVoices.mockResolvedValue(null);
     await refresh();
 
-    expect(store._manifest()).toEqual({ available: [], defaultValue: "", hideUser: false });
+    expect(store._manifest()).toEqual({ available: [], defaultValue: "" });
   });
 });
 
@@ -226,6 +321,7 @@ describe("createVoiceListRefresh — re-uploading user voices the server lost", 
     label: "My Voice",
     ref_url: "asset://x/clip.mp3",
     source: "user",
+    provider: "irodori",
   };
 
   it("a failed list (null) leaves the manifest untouched and re-uploads nothing", async () => {
@@ -259,7 +355,7 @@ describe("createVoiceListRefresh — re-uploading user voices the server lost", 
 
     await refresh();
 
-    expect(store._manifest()).toEqual({ available: [], defaultValue: "", hideUser: false });
+    expect(store._manifest()).toEqual({ available: [], defaultValue: "" });
     expect(reuploadUserVoice).toHaveBeenCalledWith(userOpt);
   });
 
@@ -326,6 +422,45 @@ describe("createVoiceListRefresh — re-uploading user voices the server lost", 
   });
 });
 
+describe("createVoiceListRefresh — fish", () => {
+  it("maps the model list's _id/title entries into the manifest", async () => {
+    listFishVoices.mockResolvedValue([
+      { id: "m1", label: "ナツメ" },
+      { id: "m2", label: "ムラサメ" },
+    ]);
+    const store = fakeStore();
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "https://api.fish.audio", tts_provider: "fish" }),
+      speakerSelection: store,
+      log: noopLog,
+    });
+
+    await refresh();
+
+    expect(listFishVoices).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "https://api.fish.audio" }),
+    );
+    expect(store._manifest().available).toEqual([
+      { id: "m1", label: "ナツメ", ref_url: "" },
+      { id: "m2", label: "ムラサメ", ref_url: "" },
+    ]);
+  });
+
+  it("offers no manifest while the provider has no voice API", async () => {
+    listFishVoices.mockClear();
+    const store = fakeStore();
+    const refresh = createVoiceListRefresh({
+      getEndpoints: () => ({ tts_base_url: "https://x", tts_provider: "not-a-provider" as never }),
+      speakerSelection: store,
+      log: noopLog,
+    });
+
+    await refresh();
+
+    expect(store.setManifest).not.toHaveBeenCalled();
+  });
+});
+
 describe("wireVoiceListAutoRefresh — endpoints override edits refetch the voice list", () => {
   function fakeSettings(initial: {
     tts_base_url?: string;
@@ -388,6 +523,25 @@ describe("wireVoiceListAutoRefresh — endpoints override edits refetch the voic
     settings.set({ tts_base_url: "http://a", tts_provider: "irodori" });
 
     expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes once per TTS key change", () => {
+    const settings = fakeSettings({ tts_base_url: "http://a" });
+    let notifyKey: () => void = () => {};
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    wireVoiceListAutoRefresh({
+      subscribe: settings.subscribe,
+      subscribeKey: (cb) => {
+        notifyKey = cb;
+        return () => {};
+      },
+      getEndpoints: settings.get,
+      refresh,
+    });
+
+    notifyKey();
+
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   it("ignores a commit that leaves the TTS fields unchanged", () => {

@@ -151,6 +151,8 @@ async function bootstrap(): Promise<void> {
     removeVoice,
     refreshVoiceList,
     canManageVoices,
+    canReuploadVoices,
+    canPasteVoiceId,
   } = wireSpeakerSelection({
     getEndpoints,
     getApiKey: getTtsApiKey,
@@ -160,6 +162,7 @@ async function bootstrap(): Promise<void> {
   void refreshVoiceList();
   const unsubscribeVoiceRefresh = wireVoiceListAutoRefresh({
     subscribe: endpointsSettings.subscribe,
+    subscribeKey: ttsKeySettings.subscribe,
     getEndpoints,
     refresh: refreshVoiceList,
   });
@@ -258,6 +261,8 @@ async function bootstrap(): Promise<void> {
       removeVoice,
       refreshVoiceList,
       canManageVoices,
+      canReuploadVoices,
+      canPasteVoiceId,
       // Renderer in main window, pass gain preview via bridge → main window VRM mouth moves.
       onGainPreview: (mouthOpen) => bridge.emitMouthPreview(mouthOpen),
       onGainPreviewEnd: () => bridge.emitMouthPreview(null),

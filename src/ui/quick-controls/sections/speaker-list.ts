@@ -7,7 +7,7 @@
  */
 import "./speaker-list.css";
 
-import { voiceIdFromName } from "../../../io/assets/safe-id";
+import { isSafeSanitizedId, voiceIdFromName } from "../../../io/assets/safe-id";
 import { resolveReferenceClipUrl } from "../../../io/voice/voices/reference-clip";
 import type {
   createSpeakerSelection,
@@ -36,6 +36,10 @@ export function speakerPickerHtml(): string {
             <div class="yui-spks" role="radiogroup" aria-label="${t("speaker.group_aria")}"></div>
           </div>
           <div class="yui-spk-foot">
+            <div class="yui-spk-manual" hidden>
+              <span class="yui-input-wrap"><input class="yui-ep-input" type="text" aria-label="${t("speaker.manual_aria")}" placeholder="${t("speaker.manual_placeholder")}" spellcheck="false" autocomplete="off" aria-invalid="false" /></span>
+              <p class="yui-spk-manual__error" role="status">${t("speaker.manual_invalid")}</p>
+            </div>
             <button class="yui-spk yui-spk--add is-ready" type="button">
               <span class="yui-spk__tick" aria-hidden="true"></span>
               <span class="yui-spk__body"><span class="yui-spk__name">${t("speaker.add")}</span></span>
@@ -67,6 +71,10 @@ interface SpeakerListDeps {
   removeVoice: (id: string) => Promise<void>;
   /** Whether the TTS provider takes imported voices — off hides delete/re-upload and disables import. */
   canManageVoices: () => boolean;
+  /** Whether the TTS provider takes a clip again under the voice's own id — off hides re-upload. */
+  canReuploadVoices: () => boolean;
+  /** On shows the paste-a-voice-id field. */
+  canPasteVoiceId: () => boolean;
   log: Logger;
   refreshTooltip: () => void;
   /** After dispose, prevent in-flight refresh from re-rendering/timering on torn-down DOM. */
@@ -94,12 +102,63 @@ export function createSpeakerList(deps: SpeakerListDeps): SpeakerList {
     commitVoiceImport,
     removeVoice,
     canManageVoices,
+    canReuploadVoices,
+    canPasteVoiceId,
     log,
     isDisposed,
   } = deps;
   const spksEl = deps.root.querySelector<HTMLDivElement>(".yui-spks")!;
   const spkAddBtn = deps.root.querySelector<HTMLButtonElement>(".yui-spk--add")!;
   const spkImportErrorEl = deps.root.querySelector<HTMLParagraphElement>(".yui-spk__import-error")!;
+  const spkManualEl = deps.root.querySelector<HTMLDivElement>(".yui-spk-manual")!;
+  const spkManualInputEl = spkManualEl.querySelector<HTMLInputElement>(".yui-ep-input")!;
+  const spkManualErrorEl =
+    spkManualEl.querySelector<HTMLParagraphElement>(".yui-spk-manual__error")!;
+
+  // A pasted voice page URL names the voice in its last path segment; anything else is the id itself.
+  function pastedVoiceId(text: string): string {
+    const trimmed = text.trim();
+    if (!/^https?:\/\//i.test(trimmed)) return trimmed;
+    try {
+      return new URL(trimmed).pathname.split("/").filter(Boolean).at(-1) ?? "";
+    } catch {
+      return trimmed;
+    }
+  }
+
+  // An id one of another provider's voices holds — it is not taken over.
+  const heldElsewhere = (id: string): boolean =>
+    speakerSelection.listUser().some((o) => o.id === id) &&
+    !speakerSelection.list().some((o) => o.id === id);
+
+  // Enter on the paste field selects the id even when the list does not carry it. An id the store
+  // cannot keep (path-ish characters) or another provider's voice holds marks the field invalid.
+  function commitPastedVoiceId(): void {
+    const id = pastedVoiceId(spkManualInputEl.value);
+    if (!id) return;
+    const reason = !isSafeSanitizedId(id)
+      ? "speaker.manual_invalid"
+      : heldElsewhere(id)
+        ? "speaker.manual_taken"
+        : null;
+    spkManualEl.classList.toggle("is-invalid", reason !== null);
+    spkManualInputEl.setAttribute("aria-invalid", String(reason !== null));
+    if (reason !== null) {
+      spkManualErrorEl.textContent = t(reason);
+      return;
+    }
+    if (!speakerSelection.list().some((o) => o.id === id)) {
+      speakerSelection.addUserOption({ id, label: id, ref_url: "", source: "user" });
+    }
+    speakerSelection.select(id);
+    spkManualInputEl.value = "";
+  }
+  spkManualInputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitPastedVoiceId();
+    }
+  });
 
   const list = createUserAssetList<SpeakerOption>({
     containerEl: spksEl,
@@ -124,6 +183,9 @@ export function createSpeakerList(deps: SpeakerListDeps): SpeakerList {
     },
     swap: swapSpeaker,
     deriveId: voiceIdFromName,
+    // A provider that keeps the caller's id (the one re-upload needs) files the clip under the
+    // name-derived id, so that id must not be another provider's voice.
+    isImportBlocked: (id) => canReuploadVoices() && heldElsewhere(id),
     pickImport: pickVoiceImport,
     commitImport: commitVoiceImport,
     render: () => renderSpeakers(),
@@ -200,6 +262,7 @@ export function createSpeakerList(deps: SpeakerListDeps): SpeakerList {
     spkAddBtn.disabled = !managed;
     // is-ready carries the interactive look; without it the add row renders muted and inert.
     spkAddBtn.classList.toggle("is-ready", managed);
+    spkManualEl.hidden = !canPasteVoiceId();
     const activeId = speakerSelection.getActiveId();
     // Roving tabindex prioritizes last roved row — falls back to active if none.
     const ids = speakerSelection.list().map((o) => o.id);
@@ -238,9 +301,10 @@ export function createSpeakerList(deps: SpeakerListDeps): SpeakerList {
       const removeHtml = managed
         ? `<button class="yui-spk__remove" type="button" data-tip="${t("speaker.remove")}" aria-label="${t("speaker.remove")}">${SPK_REMOVE_SVG}<span class="yui-spk__remove-confirm">${t("speaker.remove_confirm")}</span></button>`
         : "";
-      const refreshHtml = managed
-        ? `<button class="yui-spk__refresh" type="button" data-tip="${t("speaker.refresh")}" ${hasClip ? "" : "disabled"}>${SPK_REFRESH_SVG}</button>`
-        : "";
+      const refreshHtml =
+        managed && canReuploadVoices()
+          ? `<button class="yui-spk__refresh" type="button" data-tip="${t("speaker.refresh")}" ${hasClip ? "" : "disabled"}>${SPK_REFRESH_SVG}</button>`
+          : "";
       row.innerHTML = `
         <span class="yui-spk__tick" aria-hidden="true"></span>
         <span class="yui-spk__body"><span class="yui-spk__name"></span></span>

@@ -14,6 +14,18 @@ const { deleteVoice, listVoices, upsertVoice } = vi.hoisted(() => ({
 
 vi.mock("../../io/voice/voices/tts-voices", () => ({ deleteVoice, listVoices, upsertVoice }));
 
+const { deleteFishVoice, listFishVoices, upsertFishVoice } = vi.hoisted(() => ({
+  deleteFishVoice: vi.fn().mockResolvedValue(undefined),
+  listFishVoices: vi.fn().mockResolvedValue([]),
+  upsertFishVoice: vi.fn().mockResolvedValue("model_9"),
+}));
+
+vi.mock("../../io/voice/voices/fish-voices", () => ({
+  deleteFishVoice,
+  listFishVoices,
+  upsertFishVoice,
+}));
+
 // voice-import fakes — wireSpeakerSelection's pickVoiceImport/commitVoiceImport exercise these
 // directly; keeps the suite off the real dialog plugin / Tauri invoke.
 const { pickVoiceFile, copyVoiceFile, removeOrphanImport, removeUserVoiceMock } = vi.hoisted(
@@ -46,6 +58,7 @@ vi.mock("../../io/assets/user-asset-import", async (importOriginal) => ({
 import type { EndpointsConfig } from "../../contract";
 import { createTtsProvider } from "../../io/voice/tts/tts-synth";
 import { createVoiceListRefresh } from "../../io/voice/voices/voice-list-refresh";
+import { createTtsKeySettings } from "../../settings/backend/api-key-settings";
 import type { EndpointOverrides } from "../../settings/backend/endpoints-settings";
 import { createEffectiveEndpoints, wireAvatarSelection, wireSpeakerSelection } from "./wire-avatar";
 
@@ -120,6 +133,7 @@ describe("wireSpeakerSelection — refreshVoiceList", () => {
       label: "My Voice",
       ref_url: "asset://localhost/app-data/references/myvoice/clip.mp3",
       source: "user",
+      provider: "irodori",
     });
     // Untouched server-only id still lands as a normal server entry.
     expect(speakerSelection.list().find((o) => o.id === "ナツメ")).toEqual({
@@ -340,11 +354,8 @@ describe("wireSpeakerSelection — pickVoiceImport / commitVoiceImport", () => {
     });
 
     await expect(commitVoiceImport("/tmp/MyVoice.wav", "myvoice")).rejects.toThrow("tts_base_url");
-    expect(removeOrphanImport).toHaveBeenCalledWith(
-      "myvoice",
-      expect.any(Function),
-      expect.any(Function),
-    );
+    expect(copyVoiceFile).not.toHaveBeenCalled();
+    expect(removeOrphanImport).not.toHaveBeenCalled();
     speakerSelection.dispose();
   });
 
@@ -380,6 +391,7 @@ describe("wireSpeakerSelection — pickVoiceImport / commitVoiceImport", () => {
       ref_url: "asset://localhost/app-data/references/myvoice/clip.wav",
       source: "user",
       revision: 1,
+      provider: "irodori",
     });
     speakerSelection.dispose();
   });
@@ -561,7 +573,7 @@ describe("createEffectiveEndpoints", () => {
     });
     const refreshVoiceList = createVoiceListRefresh({
       getEndpoints,
-      speakerSelection: { listUser: () => [], setManifest: () => {} },
+      speakerSelection: { listUser: () => [], setManifest: () => {}, setOwner: () => {} },
       log: noopLog,
     });
 
@@ -736,6 +748,7 @@ describe("wireAvatarSelection — voice list refresh", () => {
       getEndpoints: () => eps,
       getTtsKey: async () => undefined,
       endpointsSettings: { subscribe: () => () => {} },
+      ttsKeySettings: { subscribe: () => () => {} },
       config: {
         subscribe: (cb) => {
           notifyConfig = () => cb({} as never, new Set(["endpoints"]));
@@ -755,6 +768,41 @@ describe("wireAvatarSelection — voice list refresh", () => {
     eps = { ...eps, tts_base_url: "http://tts2.test" };
     notifyConfig();
     await vi.waitFor(() => expect(listVoices).toHaveBeenCalledOnce());
+  });
+
+  it("refetches once when the TTS key is entered after a list the server refused", async () => {
+    const ttsKeySettings = createTtsKeySettings({ storage: { load: () => null, save: () => {} } });
+    listFishVoices
+      .mockReset()
+      .mockImplementation(async (opts: { getApiKey: () => Promise<string | undefined> }) =>
+        (await opts.getApiKey()) ? [{ id: "own1", label: "Own" }] : null,
+      );
+    const { speaker } = wireAvatarSelection({
+      renderer: {} as never,
+      getEndpoints: () => ({
+        chat_base_url: "",
+        stt_base_url: "",
+        tts_base_url: "https://api.fish.audio",
+        tts_provider: "fish",
+      }),
+      getTtsKey: async () => ttsKeySettings.get().apiKey || undefined,
+      endpointsSettings: { subscribe: () => () => {} },
+      ttsKeySettings,
+      config: { subscribe: () => () => {} },
+      log: noopLog,
+      broadcastSettings: () => {},
+      register: () => {},
+    });
+    await speaker.refreshVoiceList();
+    expect(speaker.speakerSelection.list()).toEqual([]);
+
+    ttsKeySettings.setApiKey("fish-key");
+
+    await vi.waitFor(() =>
+      expect(speaker.speakerSelection.list().map((o) => o.id)).toEqual(["own1"]),
+    );
+    expect(listFishVoices).toHaveBeenCalledTimes(2);
+    speaker.speakerSelection.dispose();
   });
 });
 
@@ -859,6 +907,113 @@ describe("wireSpeakerSelection — openai", () => {
     ).rejects.toThrow("openai");
     expect(deleteVoice).not.toHaveBeenCalled();
     expect(upsertVoice).not.toHaveBeenCalled();
+    speakerSelection.dispose();
+  });
+});
+
+describe("wireSpeakerSelection — voices belong to the provider that owns them", () => {
+  const at = (provider: "irodori" | "openai" | "fish"): EndpointsConfig => ({
+    chat_base_url: "",
+    stt_base_url: "",
+    tts_base_url: "https://tts.test",
+    tts_provider: provider,
+  });
+
+  beforeEach(() => {
+    listVoices.mockReset().mockResolvedValue(["natsume"]);
+    upsertVoice.mockReset().mockResolvedValue(undefined);
+    deleteVoice.mockReset().mockResolvedValue(undefined);
+    listFishVoices.mockReset().mockResolvedValue([{ id: "own1", label: "Own" }]);
+    upsertFishVoice.mockReset().mockResolvedValue("model_9");
+    deleteFishVoice.mockReset().mockResolvedValue(undefined);
+    removeUserVoiceMock.mockReset().mockResolvedValue(undefined);
+  });
+
+  function wire(start: EndpointsConfig) {
+    const endpoints = { current: start };
+    const wired = wireSpeakerSelection({
+      getEndpoints: () => endpoints.current,
+      log: noopLog,
+      broadcastSettings: () => {},
+    });
+    return { ...wired, endpoints };
+  }
+
+  it("keeps a pasted Fish id off the irodori list and restores it on fish", async () => {
+    const { refreshVoiceList, speakerSelection, endpoints } = wire(at("fish"));
+    await refreshVoiceList();
+    speakerSelection.addUserOption({
+      id: "libvoice",
+      label: "libvoice",
+      ref_url: "",
+      source: "user",
+    });
+    speakerSelection.select("libvoice");
+
+    endpoints.current = at("openai");
+    await refreshVoiceList();
+    endpoints.current = at("irodori");
+    await refreshVoiceList();
+
+    expect(speakerSelection.list().map((o) => o.id)).not.toContain("libvoice");
+    expect(speakerSelection.getActiveId()).not.toBe("libvoice");
+    expect(upsertVoice).not.toHaveBeenCalled();
+
+    endpoints.current = at("fish");
+    await refreshVoiceList();
+
+    expect(speakerSelection.list().map((o) => o.id)).toContain("libvoice");
+    expect(speakerSelection.getActiveId()).toBe("libvoice");
+    speakerSelection.dispose();
+  });
+
+  it("removes a pasted id locally without a server delete", async () => {
+    const { refreshVoiceList, removeVoice, speakerSelection } = wire(at("fish"));
+    await refreshVoiceList();
+    speakerSelection.addUserOption({
+      id: "libvoice",
+      label: "libvoice",
+      ref_url: "",
+      source: "user",
+    });
+
+    await removeVoice("libvoice");
+
+    expect(deleteFishVoice).not.toHaveBeenCalled();
+    expect(removeUserVoiceMock).not.toHaveBeenCalled();
+    speakerSelection.dispose();
+  });
+
+  it("re-uploads a clip only under a provider whose upload keeps the voice id", async () => {
+    const { canReuploadVoices, refreshSpeaker, speakerSelection, endpoints } = wire(at("irodori"));
+    expect(canReuploadVoices()).toBe(true);
+
+    endpoints.current = at("fish");
+
+    expect(canReuploadVoices()).toBe(false);
+    await expect(
+      refreshSpeaker({ id: "own1", ref_url: "asset://x/clip.wav", source: "user" }),
+    ).rejects.toThrow("fish");
+    expect(upsertFishVoice).not.toHaveBeenCalled();
+    speakerSelection.dispose();
+  });
+
+  it("leaves the store alone when the provider changed while a re-upload ran", async () => {
+    const { refreshSpeaker, speakerSelection, endpoints } = wire(at("irodori"));
+    const mine = {
+      id: "mine",
+      ref_url: "asset://x/mine.wav",
+      source: "user" as const,
+      revision: 2,
+    };
+    speakerSelection.addUserOption(mine);
+    upsertVoice.mockImplementation(async () => {
+      endpoints.current = at("fish");
+    });
+
+    await refreshSpeaker(mine);
+
+    expect(speakerSelection.listUser().find((o) => o.id === "mine")?.revision).toBe(2);
     speakerSelection.dispose();
   });
 });
