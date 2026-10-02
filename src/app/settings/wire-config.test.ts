@@ -42,10 +42,12 @@ const emptyEndpointOverrides = {
   stt_base_url: "",
   stt_model: "",
   tts_base_url: "",
+  tts_model: "",
   broker_base_url: "",
   chat_model: "",
   chat_model_context_window: "",
   chat_api: "",
+  tts_provider: "",
 };
 const emptyGuardrailOverrides = { tier2_max: 0, tier3_max: 0, overall_max: 0 };
 
@@ -183,9 +185,6 @@ describe("wireConfigReload", () => {
           return {};
         }),
       },
-      refreshVoiceList: vi.fn(async () => {
-        calls.push("refreshVoiceList");
-      }),
       log: { error: vi.fn() },
     };
     const returned = wireConfigReload(deps as never);
@@ -203,7 +202,7 @@ describe("wireConfigReload", () => {
       ["emotionRegistry", ["setEmotionRegistry", "broker.onConfigChange"]],
       ["guardrails", ["guardrails.setConfig", "setAttachmentLimits", "broker.onConfigChange"]],
       ["hotkeys", ["summonHotkey.apply", "broker.onConfigChange"]],
-      ["endpoints", ["refreshVoiceList", "broker.onConfigChange"]],
+      ["endpoints", ["broker.onConfigChange"]],
       [
         "avatar",
         [

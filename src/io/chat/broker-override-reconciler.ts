@@ -5,12 +5,14 @@
  *
  * onChange() compares the effective broker_base_url against the last-seen snapshot: a change
  * disposes the old client and creates+publishes+starts a new one at the new URL; an
- * empty/invalid URL disposes and leaves the broker disabled.
+ * empty/invalid URL disposes and leaves the broker disabled. A tts_provider change under the same
+ * URL reloads the emotion_text table (which announces it) and republishes to the current client.
  *
  * Pure seam: every collaborator (broker factory, table loader, payload deriver, current-client
  * accessor) is injected. Best-effort — never throws on the UI path.
  */
 
+import { ttsProviderOf } from "../../config/tts-provider";
 import type { EndpointsConfig } from "../../contract";
 import { createLogger, type Logger } from "../../logger";
 import { isValidEndpointUrl } from "../../settings/backend/endpoints-settings";
@@ -31,7 +33,7 @@ interface BrokerOverrideReconcilerOptions {
 }
 
 interface BrokerOverrideReconciler {
-  /** Reflects a broker_base_url override change to the broker (URL retarget). */
+  /** Reflects a broker_base_url change (URL retarget) or a tts_provider change (vocabulary reload). */
   onChange: () => Promise<void>;
 }
 
@@ -45,27 +47,38 @@ export function createBrokerOverrideReconciler(
 ): BrokerOverrideReconciler {
   const log = opts.logger ?? createLogger("broker-reconciler");
 
-  let lastBrokerUrl = brokerUrlOf(opts.getEffectiveEndpoints());
+  const initial = opts.getEffectiveEndpoints();
+  let lastBrokerUrl = brokerUrlOf(initial);
+  let lastProvider = ttsProviderOf(initial);
 
-  async function republish(eff: EndpointsConfig, broker: BrokerClient): Promise<void> {
+  // Publishes against the endpoints live once the table load settles, never a stale snapshot.
+  async function republish(broker: BrokerClient | null): Promise<void> {
     const table = await opts.loadTable();
-    await broker.publish(opts.derivePayload(eff, table));
+    await broker?.publish(opts.derivePayload(opts.getEffectiveEndpoints(), table));
   }
 
   async function onChange(): Promise<void> {
     try {
       const eff = opts.getEffectiveEndpoints();
       const url = brokerUrlOf(eff);
-      if (url === lastBrokerUrl) return;
+      const provider = ttsProviderOf(eff);
+      const providerChanged = provider !== lastProvider;
+      lastProvider = provider;
+      if (url === lastBrokerUrl) {
+        if (providerChanged) await republish(opts.getBroker());
+        return;
+      }
 
       const old = opts.getBroker();
       old?.dispose();
       if (url === "") {
         opts.setBroker(null);
+        // The reload still announces the provider's vocabulary to the consumers other than the broker.
+        if (providerChanged) await opts.loadTable();
       } else {
         const next = opts.createBroker(url);
         opts.setBroker(next);
-        await republish(eff, next);
+        await republish(next);
         next.start();
       }
       lastBrokerUrl = url;

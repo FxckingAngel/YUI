@@ -29,6 +29,10 @@ describe("configs/endpoints.json", () => {
     expect(ep.tts_model).toBe("irodori-tts");
   });
 
+  it("selects Irodori as the TTS provider", () => {
+    expect(ep.tts_provider).toBe("irodori");
+  });
+
   it("carries the chat protocol selection", () => {
     expect(ep.chat_api).toBe("chat_completions");
   });
@@ -40,6 +44,10 @@ describe("configs/endpoints.json", () => {
     expect(ep.chat_instructions).toContain("emotion_id");
     expect(ep.chat_instructions).toContain("motion_id");
     expect(ep.chat_instructions).toContain("emotion_text");
+  });
+
+  it("keeps chat_instructions provider-neutral: no preferred caption language", () => {
+    expect(ep.chat_instructions).not.toMatch(/japanese/i);
   });
 
   it("passes the real endpoints config through validation", () => {

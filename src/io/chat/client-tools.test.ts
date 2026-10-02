@@ -48,10 +48,14 @@ describe("createGenerateExpressTool — definition", () => {
     expect("required" in params).toBe(false);
   });
 
-  it("free-mode emotion_text is plain text", () => {
+  // With no tag set, the provider reads emotion_text as prose, so the schema asks for words.
+  it("free-mode emotion_text asks for a few plain words, not emoji", () => {
     const props = createGenerateExpressTool(vocab()).definition.function.parameters.properties;
-    expect(props.emotion_text).toMatchObject({ type: "string" });
-    expect((props.emotion_text as Record<string, unknown>).enum).toBeUndefined();
+    const emotionText = props.emotion_text as Record<string, unknown>;
+    expect(emotionText).toMatchObject({ type: "string" });
+    expect(emotionText.enum).toBeUndefined();
+    expect(String(emotionText.description)).toMatch(/words/);
+    expect(String(emotionText.description)).toMatch(/no emoji/);
   });
 
   it("enum-mode emotion_text enumerates the provider's tags and carries their meanings", () => {
@@ -82,6 +86,13 @@ describe("createGenerateExpressTool — definition", () => {
     const description = String(caption.description);
     expect(description).toMatch(/voice direction/i);
     expect(description).toMatch(/omit/i);
+  });
+
+  // Every TTS provider reads the caption, so it names no provider's preferred language.
+  it("caption's description names no language", () => {
+    const caption = createGenerateExpressTool(vocab()).definition.function.parameters.properties
+      .caption as Record<string, unknown>;
+    expect(String(caption.description)).not.toMatch(/japanese/i);
   });
 
   it("enum mode with no table falls back to free text", () => {

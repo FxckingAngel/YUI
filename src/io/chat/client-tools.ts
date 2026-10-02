@@ -72,11 +72,17 @@ function expressDescription(withMotion: boolean): string {
 
 /**
  * voice tone tag schema. In enum mode the TTS voice speaks a fixed tag table, so the tags and
- * their meanings ride in the schema; free mode takes any tag.
+ * their meanings ride in the schema; free mode asks for a few plain words the provider reads as
+ * prose.
  */
 function emotionTextSchema(emotionText: BrokerPayload["emotionText"]): Record<string, unknown> {
   const table = emotionText.mode === "enum" ? emotionText.table : null;
-  if (!table) return { type: "string", description: "voice tone tag" };
+  if (!table) {
+    return {
+      type: "string",
+      description: 'voice tone in a few plain words (e.g. "warm, teasing"), no emoji or symbols',
+    };
+  }
   const meanings = Object.entries(table)
     .map(([tag, meaning]) => `${tag} = ${meaning}`)
     .join("; ");
@@ -121,7 +127,7 @@ export function createGenerateExpressTool(vocab: BrokerPayload): ClientTool {
             caption: {
               type: "string",
               description:
-                "voice direction in natural language (Japanese reads best), applied to the " +
+                "voice direction in natural language, applied to the " +
                 "speech around this call — independent of emotion_text, and omitted when the " +
                 "default voice fits",
             },

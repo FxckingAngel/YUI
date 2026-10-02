@@ -2,7 +2,9 @@
 
 import { resolveAssetUrl, resolveUserFileSrc } from "../../config/asset-url";
 import type { AppConfig } from "../../config/load";
-import type { EndpointsConfig } from "../../contract";
+import type { ConfigStore } from "../../config/store";
+import { ttsProviderOf } from "../../config/tts-provider";
+import type { EndpointsConfig, TtsProviderName } from "../../contract";
 import { removeOrphanImport } from "../../io/assets/user-asset-import";
 import { importVrmFromFile, removeUserVrm } from "../../io/assets/vrm-import";
 import {
@@ -18,7 +20,7 @@ import {
   nextRevision,
   type SpeakerOption,
 } from "../../io/voice/voices/speaker-selection";
-import { deleteVoice, upsertVoice } from "../../io/voice/voices/tts-voices";
+import { VOICE_APIS } from "../../io/voice/voices/voice-apis";
 import { migrateUserVoiceIds } from "../../io/voice/voices/voice-id-migration";
 import {
   removeUserVoice as removeUserVoiceFile,
@@ -116,7 +118,11 @@ export function createEffectiveEndpoints(deps: {
 
 export function wireSpeakerSelection(deps: {
   /** Effective endpoints, or null while a best-effort config load has not finished. */
-  getEndpoints: () => { tts_base_url?: string; tts_speaker?: string } | null;
+  getEndpoints: () => {
+    tts_base_url?: string;
+    tts_speaker?: string;
+    tts_provider?: TtsProviderName;
+  } | null;
   /** Resolves the TTS server key (Bearer). Omitted/empty → no auth header. */
   getApiKey?: () => Promise<string | undefined>;
   log: Logger;
@@ -131,6 +137,8 @@ export function wireSpeakerSelection(deps: {
   commitVoiceImport: (srcPath: string, name: string) => Promise<void>;
   removeVoice: (id: string) => Promise<void>;
   refreshVoiceList: () => Promise<void>;
+  /** Whether the current TTS provider takes imported voices — import, delete and re-upload. */
+  canManageVoices: () => boolean;
   /** Moves imported voices whose id the TTS server rejects to an ASCII id. */
   migrateVoiceIds: () => Promise<void>;
 } {
@@ -147,12 +155,26 @@ export function wireSpeakerSelection(deps: {
   const swapSpeaker = async (option: SpeakerOption): Promise<void> => {
     speakerSelection.select(option.id);
   };
+  // The server and the provider's upload/delete operations, or a throw naming what is missing.
+  const voiceServer = (action: string) => {
+    const eps = getEndpoints();
+    if (!eps?.tts_base_url) throw new Error(`voice ${action} requires tts_base_url`);
+    const provider = ttsProviderOf(eps);
+    const api = VOICE_APIS[provider];
+    if (!api?.upsert || !api.remove) {
+      throw new Error(`TTS provider "${provider}" has no voice ${action}`);
+    }
+    return { baseUrl: eps.tts_base_url, upsert: api.upsert, remove: api.remove };
+  };
+  const canManageVoices = (): boolean => {
+    const eps = getEndpoints();
+    return Boolean(eps && VOICE_APIS[ttsProviderOf(eps)]?.upsert);
+  };
   // Re-upload the reference clip — server-side force-refresh only, does not change the selection.
   const refreshSpeaker = async (option: SpeakerOption): Promise<void> => {
-    const baseUrl = getEndpoints()?.tts_base_url;
-    if (!baseUrl) throw new Error("voice refresh requires tts_base_url");
+    const { baseUrl, upsert } = voiceServer("refresh");
     const f = await selectFetch();
-    await upsertVoice({
+    await upsert({
       baseUrl,
       id: option.id,
       refUrl: option.ref_url,
@@ -169,17 +191,16 @@ export function wireSpeakerSelection(deps: {
     });
   };
   const { pickVoiceImport, commitVoiceImport } = createVoiceImportFlow({
-    getTtsBaseUrl: () => getEndpoints()?.tts_base_url,
+    getEndpoints,
     getApiKey,
     speakerSelection,
     log,
   });
   // Deletes the server-side voice; a user-imported one also drops its local clip.
   const removeVoice = async (id: string): Promise<void> => {
-    const baseUrl = getEndpoints()?.tts_base_url;
-    if (!baseUrl) throw new Error("voice delete requires tts_base_url");
+    const { baseUrl, remove } = voiceServer("delete");
     const f = await selectFetch();
-    await deleteVoice({ baseUrl, id, fetch: f, getApiKey, logger: log });
+    await remove({ baseUrl, id, fetch: f, getApiKey, logger: log });
     const source = speakerSelection.list().find((o) => o.id === id)?.source;
     if (source === "user") await removeUserVoiceFile(id);
   };
@@ -202,6 +223,7 @@ export function wireSpeakerSelection(deps: {
     commitVoiceImport,
     removeVoice,
     refreshVoiceList,
+    canManageVoices,
     migrateVoiceIds: () =>
       migrateUserVoiceIds({
         speakerSelection,
@@ -212,12 +234,16 @@ export function wireSpeakerSelection(deps: {
   };
 }
 
-/** VRM and speaker selection with their teardowns, and the voice-list refresh on endpoint-override commits. */
+/**
+ * VRM and speaker selection with their teardowns, and the voice-list refresh on endpoint-override
+ * and config-file edits.
+ */
 export function wireAvatarSelection(deps: {
   renderer: Renderer;
   getEndpoints: () => EndpointsConfig;
   getTtsKey: () => Promise<string | undefined>;
   endpointsSettings: Pick<SettingsStores["endpointsSettings"], "subscribe">;
+  config: Pick<ConfigStore, "subscribe">;
   log: Logger;
   broadcastSettings: () => void;
   register: (dispose: () => void) => void;
@@ -235,10 +261,17 @@ export function wireAvatarSelection(deps: {
     broadcastSettings,
   });
   register(() => speaker.speakerSelection.dispose());
-  // Config-file edits refresh via onConfigChange; this covers the panel's override commits.
+  // Both the panel's override commits and config-file edits; only a TTS field change refetches.
   register(
     wireVoiceListAutoRefresh({
-      subscribe: deps.endpointsSettings.subscribe,
+      subscribe: (cb) => {
+        const unsubscribeOverrides = deps.endpointsSettings.subscribe(cb);
+        const unsubscribeConfig = deps.config.subscribe(() => cb());
+        return () => {
+          unsubscribeOverrides();
+          unsubscribeConfig();
+        };
+      },
       getEndpoints,
       refresh: speaker.refreshVoiceList,
     }),

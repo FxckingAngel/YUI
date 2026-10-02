@@ -147,3 +147,123 @@ describe("createBrokerOverrideReconciler — broker_base_url change", () => {
     await expect(reconciler.onChange()).resolves.toBeUndefined();
   });
 });
+
+describe("createBrokerOverrideReconciler — tts_provider change", () => {
+  // Mirrors the real loader: the emoji table exists only for Irodori.
+  const loadFor = (eff: () => EndpointsConfig) =>
+    vi.fn(async () => (eff().tts_provider === "openai" ? null : { "😆": "Laugh" }));
+  const modeOf = (_eff: EndpointsConfig, table: Record<string, string> | null): BrokerPayload => ({
+    emotionIds: [],
+    motionIds: [],
+    emotionText: table ? { mode: "enum", table } : { mode: "free", table: null },
+  });
+
+  it("republishes enum → free → enum across irodori → openai → irodori with the URL unchanged", async () => {
+    const broker = fakeBroker();
+    let provider: EndpointsConfig["tts_provider"] = "irodori";
+    const eff = () => endpoints({ tts_provider: provider });
+    const reconciler = createBrokerOverrideReconciler({
+      getEffectiveEndpoints: eff,
+      getBroker: () => broker,
+      setBroker: vi.fn(),
+      createBroker: vi.fn(),
+      loadTable: loadFor(eff),
+      derivePayload: modeOf,
+    });
+
+    provider = "openai";
+    await reconciler.onChange();
+    provider = "irodori";
+    await reconciler.onChange();
+
+    const modes = broker.publish.mock.calls.map(([p]) => (p as BrokerPayload).emotionText.mode);
+    expect(modes).toEqual(["free", "enum"]);
+    expect(broker.dispose).not.toHaveBeenCalled();
+  });
+
+  it("reloads the table on a provider change with no broker configured", async () => {
+    let provider: EndpointsConfig["tts_provider"] = "irodori";
+    const eff = () => endpoints({ broker_base_url: "", tts_provider: provider });
+    const loadTable = loadFor(eff);
+    const reconciler = createBrokerOverrideReconciler({
+      getEffectiveEndpoints: eff,
+      getBroker: () => null,
+      setBroker: vi.fn(),
+      createBroker: vi.fn(),
+      loadTable,
+      derivePayload: modeOf,
+    });
+
+    provider = "openai";
+    await reconciler.onChange();
+
+    expect(loadTable).toHaveBeenCalledOnce();
+  });
+
+  it("publishes with the endpoints live after the table load", async () => {
+    const broker = fakeBroker();
+    let provider: EndpointsConfig["tts_provider"] = "irodori";
+    const eff = () => endpoints({ tts_provider: provider });
+    let release: () => void = () => {};
+    const derivePayload = vi.fn(modeOf);
+    const reconciler = createBrokerOverrideReconciler({
+      getEffectiveEndpoints: eff,
+      getBroker: () => broker,
+      setBroker: vi.fn(),
+      createBroker: vi.fn(),
+      loadTable: () =>
+        new Promise((resolve) => {
+          release = () => resolve(null);
+        }),
+      derivePayload,
+    });
+
+    provider = "openai";
+    const pending = reconciler.onChange();
+    provider = "irodori";
+    release();
+    await pending;
+
+    expect(derivePayload.mock.calls[0][0].tts_provider).toBe("irodori");
+  });
+
+  it("reloads the table when the URL empties and the provider changes in one notification", async () => {
+    let url = "http://localhost:3201/mcp";
+    let provider: EndpointsConfig["tts_provider"] = "irodori";
+    const eff = () => endpoints({ broker_base_url: url, tts_provider: provider });
+    const loadTable = loadFor(eff);
+    const reconciler = createBrokerOverrideReconciler({
+      getEffectiveEndpoints: eff,
+      getBroker: () => fakeBroker(),
+      setBroker: vi.fn(),
+      createBroker: vi.fn(),
+      loadTable,
+      derivePayload: modeOf,
+    });
+
+    url = "";
+    provider = "openai";
+    await reconciler.onChange();
+
+    expect(loadTable).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the table alone when an endpoints change moves neither the URL nor the provider", async () => {
+    const eff = () => endpoints({ tts_provider: "openai", tts_model: "gpt-4o-mini-tts" });
+    const loadTable = loadFor(eff);
+    const broker = fakeBroker();
+    const reconciler = createBrokerOverrideReconciler({
+      getEffectiveEndpoints: eff,
+      getBroker: () => broker,
+      setBroker: vi.fn(),
+      createBroker: vi.fn(),
+      loadTable,
+      derivePayload: modeOf,
+    });
+
+    await reconciler.onChange();
+
+    expect(loadTable).not.toHaveBeenCalled();
+    expect(broker.publish).not.toHaveBeenCalled();
+  });
+});

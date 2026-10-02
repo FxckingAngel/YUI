@@ -281,6 +281,24 @@ describe("createQuickControls — speaker section", () => {
     qc.dispose();
   });
 
+  it("with a provider that takes no uploaded voices, the add row is disabled and no row deletes or re-uploads", () => {
+    speakerSelection = makeSpeakerSelection();
+    speakerSelection.addUserOption(USER_VOICE);
+    const qc = buildQc({ canManageVoices: () => false });
+    qc.open();
+
+    const add = qc.el.querySelector<HTMLButtonElement>(".yui-spk--add")!;
+    expect(add.disabled).toBe(true);
+    // Without is-ready the row takes the inert add-row look: muted label, no hover accent.
+    expect(add.classList.contains("is-ready")).toBe(false);
+    add.click();
+    expect(pickVoiceImport).not.toHaveBeenCalled();
+    expect(qc.el.querySelector(".yui-spk__remove")).toBeNull();
+    expect(qc.el.querySelector(".yui-spk__refresh")).toBeNull();
+
+    qc.dispose();
+  });
+
   // ── Speaker: user (imported) voice management — mirrors the VRM section ──────
 
   function withUserVoice() {

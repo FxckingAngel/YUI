@@ -113,6 +113,37 @@ describe("wireBroker", () => {
     expect(vi.mocked(loadEmotionTextTable)).toHaveBeenCalledWith({ provider: "irodori" });
   });
 
+  it("loads no emoji table for a provider other than irodori — the vocabulary is free", async () => {
+    const { deps, onVocabularyChange } = makeDeps({ broker_base_url: "", tts_provider: "openai" });
+    const handle = await wireBroker(deps);
+    deriveBrokerPayload.mockClear();
+
+    handle.vocabulary();
+
+    expect(vi.mocked(loadEmotionTextTable)).not.toHaveBeenCalled();
+    expect(deriveBrokerPayload).toHaveBeenCalledWith(expect.anything(), null, expect.anything());
+    expect(onVocabularyChange).toHaveBeenCalled();
+  });
+
+  // The reconciler reloads through this loader on a provider switch, so it reads the live provider.
+  it("hands the reconciler a loader that follows the live provider", async () => {
+    const endpoints: Record<string, unknown> = { broker_base_url: "", tts_provider: "irodori" };
+    const { deps } = makeDeps(endpoints);
+    await wireBroker(deps);
+    const [reconcilerOpts] = createReconciler.mock.calls.at(-1) as unknown as [
+      { loadTable: () => Promise<unknown> },
+    ];
+    vi.mocked(loadEmotionTextTable).mockClear();
+
+    endpoints.tts_provider = "openai";
+    expect(await reconcilerOpts.loadTable()).toBeNull();
+    expect(vi.mocked(loadEmotionTextTable)).not.toHaveBeenCalled();
+
+    vi.mocked(loadEmotionTextTable).mockResolvedValueOnce({ "😆": "Laugh" });
+    endpoints.tts_provider = "irodori";
+    expect(await reconcilerOpts.loadTable()).toEqual({ "😆": "Laugh" });
+  });
+
   it("degrades to a null table when the emotion_text load fails, without throwing into boot", async () => {
     vi.mocked(loadEmotionTextTable).mockRejectedValueOnce(new Error("missing file"));
     const { deps } = makeDeps({ broker_base_url: "http://localhost:3201" });
@@ -221,6 +252,58 @@ describe("wireBroker", () => {
     await loadTable();
 
     expect(onVocabularyChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a table load the provider has moved past, so the vocabulary follows the live provider", async () => {
+    const endpoints: Record<string, unknown> = { broker_base_url: "", tts_provider: "irodori" };
+    vi.mocked(loadEmotionTextTable).mockResolvedValueOnce({ "😆": "Laugh" });
+    const { deps } = makeDeps(endpoints);
+    const handle = await wireBroker(deps);
+    const [reconcilerOpts] = createReconciler.mock.calls.at(-1) as unknown as [
+      { loadTable: () => Promise<unknown> },
+    ];
+
+    endpoints.tts_provider = "openai";
+    await reconcilerOpts.loadTable();
+    let release: (table: Record<string, string>) => void = () => {};
+    vi.mocked(loadEmotionTextTable).mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    endpoints.tts_provider = "irodori";
+    const late = reconcilerOpts.loadTable();
+    endpoints.tts_provider = "openai";
+    await reconcilerOpts.loadTable();
+    release({ "😆": "Laugh" });
+
+    expect(await late).toBeNull();
+    deriveBrokerPayload.mockClear();
+    handle.vocabulary();
+    expect(deriveBrokerPayload).toHaveBeenCalledWith(expect.anything(), null, expect.anything());
+  });
+
+  it("reloads the table on a disk endpoints change only when the provider moves", async () => {
+    const endpoints: Record<string, unknown> = {
+      broker_base_url: "http://localhost:3201",
+      tts_provider: "irodori",
+    };
+    const { deps } = makeDeps(endpoints);
+    const handle = await wireBroker(deps);
+    await flush();
+    vi.mocked(loadEmotionTextTable).mockClear();
+    brokerClient.publish.mockClear();
+    const cfg = { emotionRegistry: {}, motions: {}, endpoints: {} } as never;
+
+    handle.onConfigChange(cfg, new Set(["endpoints"]) as never);
+    await flush();
+    expect(vi.mocked(loadEmotionTextTable)).not.toHaveBeenCalled();
+    expect(brokerClient.publish).not.toHaveBeenCalled();
+
+    endpoints.tts_provider = "openai";
+    handle.onConfigChange(cfg, new Set(["endpoints"]) as never);
+    await flush();
+    expect(brokerClient.publish).toHaveBeenCalledTimes(1);
   });
 
   it("tells them even with no broker configured — the vocabulary has other consumers", async () => {
