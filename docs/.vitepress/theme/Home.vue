@@ -33,6 +33,13 @@ onMounted(() => {
               class="btn btn--quiet"
               >Watch the demo ↗</a
             >
+            <a
+              href="https://github.com/yw0nam/YUI/releases/latest"
+              rel="noopener"
+              target="_blank"
+              class="btn btn--quiet"
+              >Download ↗</a
+            >
           </div>
         </div>
 
