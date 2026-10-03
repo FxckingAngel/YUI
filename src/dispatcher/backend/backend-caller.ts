@@ -196,19 +196,17 @@ export function createBackendCaller(deps: BackendCallerDeps): BackendCaller {
     // (setup reject, early abort, stream throw, post-loop abort, streamError, empty/parse_error,
     // normal completion all covered).
     try {
-      // If filler is active, show first line immediately (synchronous start). Don't start if disabled/pool empty,
-      // or on a reflex turn — a "thinking" bridge before an immediate reaction reads as dissonant.
-      if (deps.turnOutput?.hasFiller() && !isReflexTurn(env.event_name)) {
-        startThinking();
-      }
-
       // No chat backend configured — settle before any context/network work so the UI can point
       // the user at the settings panel instead of showing a generic connection failure.
       if (!isChatConfigured(deps.config)) {
         log.warn("not_configured", { event_name: env.event_name, missing: "chat_base_url" });
         return "not_configured";
       }
-
+      // If filler is active, show first line immediately (synchronous start). Don't start if disabled/pool empty,
+      // or on a reflex turn — a "thinking" bridge before an immediate reaction reads as dissonant.
+      if (deps.turnOutput?.hasFiller() && !isReflexTurn(env.event_name)) {
+        startThinking();
+      }
       // B1
       const { ctx, clientContext } = await buildContext(env, {
         getScreenshot: deps.getScreenshot,

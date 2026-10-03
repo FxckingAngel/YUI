@@ -1170,10 +1170,13 @@ describe("backend_caller — unconfigured chat backend", () => {
     expect(script.spy).not.toHaveBeenCalled();
   });
 
-  it("closes the TTFT thinking filler it opened", async () => {
+  it("does not start the thinking filler when chat is not configured", async () => {
     turnOutput.hasFiller.mockReturnValue(true);
-    await unconfiguredCaller().call(turnOf(userEnv()));
-    expect(turnOutput.thinkingEnd).toHaveBeenCalledTimes(1);
+
+    const outcome = await unconfiguredCaller().call(turnOf(userEnv()));
+
+    expect(outcome).toBe("not_configured");
+    expect(turnOutput.thinkingStart).not.toHaveBeenCalled();
   });
 
   // The onboarding hint reads the same predicate, so the two surfaces cannot disagree.
