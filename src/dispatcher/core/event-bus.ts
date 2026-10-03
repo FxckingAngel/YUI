@@ -2,7 +2,7 @@
  * Event bus — single collection point for all speech candidate events.
  *
  * Queue policy:
- *  - Data structure: priority heap, key = (tier ASC, ts ASC), same tier FIFO (insertion order).
+ *  - Data structure: sorted array, key = (priority ASC, ts ASC), same key FIFO (insertion order).
  *  - Capacity 100. Exceeding drops lowest-priority items first + onDrop callback/log.
  *  - Bus drop conditions: schema invalid / unknown event_name / ts ±60s out of window.
  *
@@ -22,8 +22,6 @@ export interface BusEnvelope {
   /** client epoch ms. */
   ts: number;
   payload?: Record<string, unknown>;
-  /** Source-estimated tier. Dispatcher makes final decision. */
-  hint_tier?: 1 | 2 | 3;
   /** True only for user-initiated (DND/debounce bypass). */
   dnd_override?: boolean;
 }
@@ -38,10 +36,6 @@ type BusDropReason =
 interface EventBusOptions {
   /** Callback on drop (dev logging/observation). */
   onDrop?: (env: BusEnvelope, reason: BusDropReason) => void;
-  /** Queue capacity. default 100. */
-  capacity?: number;
-  /** ts allowed window (ms). default 60_000 (±60s). */
-  tsWindowMs?: number;
 }
 
 export interface EventBus {
@@ -99,8 +93,9 @@ function compare(a: QueueItem, b: QueueItem): number {
 }
 
 export function createEventBus(opts: EventBusOptions = {}): EventBus {
-  const capacity = opts.capacity ?? 100;
-  const tsWindowMs = opts.tsWindowMs ?? 60_000;
+  const capacity = 100;
+  /** ts allowed window (ms): ±60s. */
+  const tsWindowMs = 60_000;
   const onDrop = opts.onDrop;
 
   // Simple sorted array — for capacity 100, clearer and fast enough vs binary-heap.

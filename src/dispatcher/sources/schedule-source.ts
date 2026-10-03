@@ -86,13 +86,10 @@ export function createScheduleSource(deps: ScheduleSourceDeps): ScheduleSource {
         source: "timer_scheduler",
         event_name: `schedule.${cue.id}`,
         ts: now(),
-        hint_tier: 2,
-        dnd_override: false,
         payload: {
           cue_id: cue.id,
           label: cue.label,
           context: cue.context,
-          local_time: currentHHMM,
         },
       };
       bus.push(env);

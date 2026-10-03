@@ -417,10 +417,10 @@ describe("wireWindowSync", () => {
 
 describe("wireGuardrailsOverrides", () => {
   const inMemoryStorage = () => {
-    let value: { tier2_max: number; tier3_max: number; overall_max: number } | null = null;
+    let value: { tier2_max: number; overall_max: number } | null = null;
     return {
       load: () => (value ? { ...value } : null),
-      save: (s: { tier2_max: number; tier3_max: number; overall_max: number }) => {
+      save: (s: { tier2_max: number; overall_max: number }) => {
         value = { ...s };
       },
     };
@@ -436,7 +436,6 @@ describe("wireGuardrailsOverrides", () => {
       rate_limit: {
         window_ms: 3_600_000,
         tier2_max: 2,
-        tier3_max: 2,
         overall_max: 100,
         cooldown_ms: 300_000,
       },
@@ -445,10 +444,11 @@ describe("wireGuardrailsOverrides", () => {
   }
 
   const fire = (guardrails: ReturnType<typeof createGuardrails>): boolean =>
-    guardrails.evaluate(
-      { source: "os_event_watcher", event_name: "proactive.head_pat", ts: 1_717_000_000_000 },
-      2,
-    ).pass;
+    guardrails.evaluate({
+      source: "os_event_watcher",
+      event_name: "proactive.head_pat",
+      ts: 1_717_000_000_000,
+    }).pass;
 
   function setup() {
     const config = baseConfig();

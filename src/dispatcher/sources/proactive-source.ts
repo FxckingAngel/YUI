@@ -78,13 +78,10 @@ export function createProactiveSource(deps: ProactiveSourceDeps): ProactiveSourc
         source: "timer_scheduler",
         event_name: `proactive.${cue.id}`,
         ts: tickNow,
-        hint_tier: 2,
-        dnd_override: false,
         payload: {
           cue_id: cue.id,
           label: cue.label,
           context: cue.context,
-          idle_min: cue.idle_min,
           gap_ms: gap,
         },
       };
