@@ -48,6 +48,10 @@ function fakeDelegations(initial: DelegationItem[] = []) {
       items = next;
       for (const cb of subs) cb(next);
     },
+    /** Replaces the list the getter returns without notifying a subscriber. */
+    setSilently(next: DelegationItem[]): void {
+      items = next;
+    },
     listenerCount: () => subs.size,
     refresh: vi.fn(),
   };
@@ -322,5 +326,47 @@ describe("createQuickControls — session section delegated list", () => {
 
     expect(delegations.listenerCount()).toBe(0);
     expect(() => vi.advanceTimersByTime(120_000)).not.toThrow();
+  });
+
+  describe("minute timer", () => {
+    it("ticks while the panel was never opened", () => {
+      const delegations = fakeDelegations();
+      const qc = createQuickControls({ ...defaultQcArgs(mount), delegations });
+
+      delegations.emit([running("d-1", 60_000)]);
+      vi.advanceTimersByTime(60_000);
+
+      expect(delegations.refresh).toHaveBeenCalledOnce();
+
+      qc.dispose();
+    });
+
+    it("asks the mirror to refresh before it redraws the rows", () => {
+      const delegations = fakeDelegations([running("d-1", 4 * 60_000)]);
+      delegations.refresh.mockImplementation(() => {
+        delegations.setSilently([running("d-2", 10 * 60_000)]);
+      });
+      const qc = buildQc(delegations);
+      qc.open();
+      expect(rowTimes(qc)).toEqual(["4분"]);
+
+      vi.advanceTimersByTime(60_000);
+
+      expect(rowTimes(qc)).toEqual(["11분"]);
+
+      qc.dispose();
+    });
+
+    it("does not arm after dispose", () => {
+      const delegations = fakeDelegations();
+      const qc = buildQc(delegations);
+      qc.open();
+      qc.dispose();
+
+      delegations.emit([running("d-1", 60_000)]);
+      vi.advanceTimersByTime(120_000);
+
+      expect(delegations.refresh).not.toHaveBeenCalled();
+    });
   });
 });
