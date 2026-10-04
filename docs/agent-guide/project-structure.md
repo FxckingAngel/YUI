@@ -66,6 +66,9 @@ YUI/
         wire-avatar.ts               # VRM and speaker selection stores, their swap and import flows, the voice-list refresh on override commits, and the avatar config applied at boot
         wire-config.ts               # The config store over the bundled configs, the runtime key stores, the live endpoint/guardrail merges, and the reload/watch wiring
         wire-cue-locale-sync.ts      # Reseeds untouched built-in cues when the display language changes
+      message/                       # The message window's wiring
+        wire-message-surface-ops.ts  # Draws each surface op from the pet window onto the surfaces and the plate
+        wire-message-tauri-window.ts # Window focus, the OS drag, the content-height resize, and the moved-position record
       settings-window/               # The settings window's wiring
         wire-settings-window.ts      # Stores, config, cross-window sync, and the quick controls remounted on locale change
         wire-voice-mirror.ts         # Mirrors the voice toggle to the pet window and the pet window's voice state back
