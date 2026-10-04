@@ -1,9 +1,6 @@
 /** Push transport path of a turn: send the frame on the socket and hold the call open until that turn ends. */
 import type { InputContext } from "../../contract";
-import type { ChatHistoryEntry } from "../../io/chat/chat-history-store";
-import type { ContextHistoryEntry } from "../../io/chat/context-history";
 import type { PushTurnFrame } from "../../io/chat/push-socket";
-import { buildTurnRecord, type TurnRecord } from "../../io/chat/turn-record-log";
 import type { Logger } from "../../logger";
 import type { BusEnvelope } from "../core/event-bus";
 import type { PushTurns } from "../turn/push-turn";
@@ -13,21 +10,12 @@ import type { buildContext } from "./context-builder";
 import { PRE_SPEECH_TIMEOUT_MS } from "./idle-watchdog";
 import { contextBlock } from "./request-input";
 import type { TurnOutcome } from "./turn-outcome";
+import { recordSentTurn, type TurnRecordingDeps } from "./turn-recording";
 
 /** The subset of `createBackendCaller`'s deps the push path reads. */
-export interface PushCallDeps {
+export interface PushCallDeps extends TurnRecordingDeps {
   /** B4 speech-gate outcome sink — whether the turn returned speech text, independent of TTS. */
   reportSpokeText?: (spoke: boolean) => void;
-  /** Integrated conversation transcript — append after completely successful turn in both protocol modes, unless a reset opened a new session meanwhile (sessionToken). CC mode replays the current session from here. */
-  transcript?: {
-    entriesAfterLastBoundary(): ChatHistoryEntry[];
-    append(e: ChatHistoryEntry): void;
-    sessionToken(): string;
-  };
-  /** Local sent-context history, appended only after the turn is confirmed successful. */
-  contextHistory?: { append(entry: ContextHistoryEntry): void };
-  /** Turn-record JSONL sink — best-effort disk log for speak-rate/suppression analysis. */
-  appendTurnRecord?: (record: TurnRecord) => void;
   /** Push transport sender — present in push mode; false means the socket was not ready. */
   pushTurn?: (frame: PushTurnFrame) => boolean;
   /** The socket accepted this turn's frame. */
@@ -176,37 +164,14 @@ export function createPushCall(deps: PushCallDeps, log: Logger): PushCall {
     log.info("push_turn", { event_name: env.event_name, turn_id: String(turn.id) });
     deps.reportSpokeText?.(false);
     // The reply arrives on its own later and is appended there; this half is the user's.
-    if (deps.transcript && ctx.user_text !== undefined) {
-      if (deps.transcript.sessionToken() === startSessionToken) {
-        deps.transcript.append({
-          role: "user",
-          text: ctx.user_text,
-          ts: Date.now(),
-          ...(clientContext.trigger.guide ? { guide: clientContext.trigger.guide } : {}),
-        });
-      } else {
-        log.info("transcript_skipped", { reason: "session_reset", event_name: env.event_name });
-      }
-    }
-    deps.contextHistory?.append({
-      ts: Date.now(),
-      event_name: env.event_name,
-      trigger_kind: clientContext.trigger.kind,
-      client_context: clientContext,
+    recordSentTurn(deps, log, {
+      eventName: env.event_name,
+      userText: ctx.user_text,
+      clientContext,
+      startSessionToken,
+      spokeText: false,
+      userHalfOnly: true,
     });
-    try {
-      deps.appendTurnRecord?.(
-        buildTurnRecord({
-          ts: Date.now(),
-          event_name: env.event_name,
-          trigger_kind: clientContext.trigger.kind,
-          client_context: clientContext,
-          spoke_text: false,
-        }),
-      );
-    } catch (err) {
-      log.debug("turn_record_append_failed", { error: String(err) });
-    }
     if (externalSignal?.aborted) return "superseded_by_user";
     return await awaitPushReply(turn, env.event_name, endThinking, externalSignal);
   }
