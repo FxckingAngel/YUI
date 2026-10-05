@@ -46,6 +46,8 @@ export function wirePushTransport(deps: {
   appendTurnRecord: (record: RenderRecord) => void;
   /** Conversation transcript — the reply half of a push turn lands here. */
   appendTranscript: (entry: ChatHistoryEntry) => void;
+  /** Speech-gate sink keyed by the dispatcher's turn id; a backend-minted id names no such turn. */
+  reportSpokeText: (turnId: number, spoke: boolean) => void;
   log: Logger;
 }): () => void {
   const renderTurn = createRenderTurn({
@@ -53,6 +55,11 @@ export function wirePushTransport(deps: {
     pushTurns: deps.pushTurns,
     appendTurnRecord: deps.appendTurnRecord,
     appendTranscript: deps.appendTranscript,
+    reportSpokeText: (turnId, spoke) => {
+      // Only the id the client sent, `String(turn.id)`, names a ledger turn.
+      const id = Number(turnId);
+      if (String(id) === turnId) deps.reportSpokeText(id, spoke);
+    },
   });
   const unsubscribes = [
     deps.socket.onRender((frame) => {
