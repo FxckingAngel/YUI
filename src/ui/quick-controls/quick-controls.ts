@@ -70,8 +70,8 @@ import { createAgentSection } from "./sections/agent-section";
 import { createFillerSection } from "./sections/filler/filler-section";
 import { bindHelpSection } from "./sections/help-section";
 import { createMonitorsSection } from "./sections/monitors-section";
-import { createReactionsSection } from "./sections/reactions-section";
-import { createScreenSection } from "./sections/screen-section";
+import { createReactionsSection } from "./sections/reactions/reactions-section";
+import { createScreenSection } from "./sections/screen/screen-section";
 import { createSpeakerList, speakerPickerHtml } from "./sections/speaker-list";
 import { createWorkflowsSection } from "./sections/workflows-section";
 import { bindSlider } from "./slider-binding";
@@ -415,7 +415,6 @@ export function createQuickControls({
     root: el,
     switchRows: TOGGLE_SPECS,
     settings,
-    agentNotifySettings,
     vad,
     agentSettings,
     sessionDiagnostics,
@@ -424,13 +423,6 @@ export function createQuickControls({
       ? { getPushState: () => (isPushMode() ? pushSocket.getState() : undefined) }
       : {}),
     ...(delegations ? { delegations } : {}),
-    presenceSettings,
-    pacerGapSettings,
-    rateLimitSettings,
-    getRateLimitDefaults,
-    screenSettings,
-    screenKnobSettings,
-    getScreenDefaults,
   });
 
   const delegationSync = createDelegationSync({
@@ -499,11 +491,8 @@ export function createQuickControls({
     onOpen: () => {
       reflect.reflectSettings();
       reflect.reflectSwitchRows();
-      reflect.reflectAgentNotify();
-      reflect.reflectPresence();
-      reflect.reflectPacerGap();
-      reflect.reflectRateLimits();
-      reflect.reflectScreen();
+      reactions.reflect();
+      screen.reflect();
       reflect.reflectVoiceStatus(voiceStatus.get());
       reflect.reflectVad();
       reflect.reflectAgent();
@@ -533,7 +522,7 @@ export function createQuickControls({
     root: el,
     screenSettings,
     screenKnobSettings,
-    reflectScreen: reflect.reflectScreen,
+    getScreenDefaults,
     reflectSwitchRows: reflect.reflectSwitchRows,
     isOpen: popover.isOpen,
   });
@@ -545,10 +534,7 @@ export function createQuickControls({
     presenceSettings,
     pacerGapSettings,
     rateLimitSettings,
-    reflectAgentNotify: reflect.reflectAgentNotify,
-    reflectPresence: reflect.reflectPresence,
-    reflectPacerGap: reflect.reflectPacerGap,
-    reflectRateLimits: reflect.reflectRateLimits,
+    getRateLimitDefaults,
     reflectSwitchRows: reflect.reflectSwitchRows,
     isOpen: popover.isOpen,
   });
