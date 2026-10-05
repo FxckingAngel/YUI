@@ -3,19 +3,20 @@
  * Mirrors VRM section but differs in one way: rows are div[role=radio], not <button>
  * (to hold nested ▶ preview <button> — button-in-button is invalid HTML, parser strips it).
  * So wires roving tabindex/Enter·Space/arrow keyboard directly.
- * Additionally owns reference-voice refresh + single audition preview.
+ * Additionally owns reference-voice refresh + single audition preview, the speaker store
+ * subscription, and the list's keydown and add-button listeners.
  */
 import "./speaker-list.css";
 
-import { isSafeSanitizedId, voiceIdFromName } from "../../../io/assets/safe-id";
-import { resolveReferenceClipUrl } from "../../../io/voice/voices/reference-clip";
+import { isSafeSanitizedId, voiceIdFromName } from "../../../../io/assets/safe-id";
+import { resolveReferenceClipUrl } from "../../../../io/voice/voices/reference-clip";
 import type {
   createSpeakerSelection,
   SpeakerOption,
-} from "../../../io/voice/voices/speaker-selection";
-import type { Logger } from "../../../logger";
-import { t } from "../../i18n";
-import { createUserAssetList, REMOVE_SVG, RENAME_SVG, resolveRovedId } from "./user-asset-list";
+} from "../../../../io/voice/voices/speaker-selection";
+import type { Logger } from "../../../../logger";
+import { t } from "../../../i18n";
+import { createUserAssetList, REMOVE_SVG, RENAME_SVG, resolveRovedId } from "../user-asset-list";
 
 const SPK_PLAY_SVG = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`;
 const SPK_PAUSE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="6" width="3.4" height="12" rx="0.8"/><rect x="13.6" y="6" width="3.4" height="12" rx="0.8"/></svg>`;
@@ -76,17 +77,19 @@ interface SpeakerListDeps {
   refreshTooltip: () => void;
   /** After dispose, prevent in-flight refresh from re-rendering/timering on torn-down DOM. */
   isDisposed: () => boolean;
+  /** Popover open state — the store subscription re-renders only while the panel is open. */
+  isOpen: () => boolean;
 }
 
 interface SpeakerList {
   render(): void;
   handleKeydown(e: KeyboardEvent): void;
   handleAddClick(): void;
-  /** Whether swap is in progress — used by entry's open-subscription guard. */
+  /** Whether swap is in progress — the store subscription's guard. */
   isSwapping(): boolean;
   /** Stop audition (when panel closes). */
   stopAudition(): void;
-  /** Permanent teardown — stop audition + clean refresh timers/state. */
+  /** Permanent teardown — unsubscribe the store, stop audition, clean refresh timers/state, remove listeners. */
   dispose(): void;
 }
 
@@ -103,6 +106,7 @@ export function createSpeakerList(deps: SpeakerListDeps): SpeakerList {
     canPasteVoiceId,
     log,
     isDisposed,
+    isOpen,
   } = deps;
   const spksEl = deps.root.querySelector<HTMLDivElement>(".yui-spks")!;
   const spkAddBtn = deps.root.querySelector<HTMLButtonElement>(".yui-spk--add")!;
@@ -465,12 +469,24 @@ export function createSpeakerList(deps: SpeakerListDeps): SpeakerList {
     }
   }
 
+  // Reflect speaker store updates (direct select · other-window reloadFromStorage) to active row.
+  // Skip during swap — finally's renderSpeakers handles final render after loading.
+  const unsubscribe = speakerSelection.subscribe(() => {
+    if (isOpen() && !list.isSwapping()) renderSpeakers();
+  });
+
+  spksEl.addEventListener("keydown", list.handleKeydown);
+  spkAddBtn.addEventListener("click", list.handleAddClick);
+
   function dispose(): void {
+    unsubscribe();
     list.dispose();
     stopAudition();
     for (const timer of spkRefreshTimers.values()) clearTimeout(timer);
     spkRefreshTimers.clear();
     spkRefreshState.clear();
+    spksEl.removeEventListener("keydown", list.handleKeydown);
+    spkAddBtn.removeEventListener("click", list.handleAddClick);
   }
 
   return {

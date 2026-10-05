@@ -452,7 +452,6 @@ YUI/
         controls.css                 # Switch, segment, field, text-button, disclosure, slider, and confirm styles
         template.ts                  # Panel markup as pure string construction
         popover.ts                   # Popover shell: positioning, dragging, open and close lifecycle
-        reflect.ts                   # Store to DOM reflection for the panel parts without their own
         constants.ts                 # Display constants shared by the panel, its sections, and the chips that reuse its glyphs
         switch-row.ts                # Switch-row element contract, the row table filling it, and each row's store follower
         seg-keyboard.ts              # Arrow, Home, End and commit keyboard handling shared by the segmented controls
@@ -476,6 +475,8 @@ YUI/
           cue-lists.ts               # Mounts and tears down the two cue lists
         delegations/                 # Delegated-work refresh for the session section
           delegation-sync.ts         # Minute refresh timer that follows the running delegated items
+        header/                      # Popover header bar buttons
+          header-buttons.ts          # Pop-out, message, devtools and close buttons with their listeners
         history/                     # History tab and its session accordion section
           history-section.ts         # History tab session accordion over the persisted transcript
           history-section.css        # Session history accordion styles
@@ -497,12 +498,13 @@ YUI/
           filler/                    # Thinking-filler section
             filler-section.ts        # Language segment and phrase-pool textareas, with their store subscription and reflect
             filler-tool-lines.ts     # Textarea round-trip for the filler pool's tool tier
-          speaker-list.ts            # Speaker radiogroup with reference-voice refresh and audition
+          speaker/                   # TTS speaker picker of the Connection tab
+            speaker-list.ts          # Speaker radiogroup with reference-voice refresh and audition
+            speaker-list.css         # Speaker list styles
           user-asset-list.ts         # Shared scaffolding for the VRM and speaker asset radiogroups
           monitors-section.css       # Monitors section styles
           session-section.css        # Session context-occupancy readout and meter styles
           workflows-section.css      # Workflows section styles
-          speaker-list.css           # Speaker list styles
           user-asset-list.css        # Radio row, tick, and state styles shared by the monitor, VRM, and speaker lists
         switches/                    # Switch rows shared with the phone settings view
           switch-rows.ts             # Row markup, click binding, repaint, and the store following while open
