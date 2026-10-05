@@ -42,7 +42,8 @@ ln -sfn $YUI/integrations/hermes/desire ~/.hermes/plugins/yui-desire
 hermes -p <profile> plugins enable yui-desire
 ```
 
-Check: `hermes -p <profile> plugins list` shows `yui-desire` enabled. Do not grant the plugin built-in tool
+Check: `hermes -p <profile> plugins list` shows `yui-desire` enabled. The list is configuration state only and does not
+prove the plugin loaded; the load check is step 9, after the gateway restarts. Do not grant the plugin built-in tool
 override permission; the middleware needs none.
 
 ## 3. Environment
@@ -166,7 +167,7 @@ Check: `wants.md` exists and lists the wants.
 ## 8. Verify injection
 
 Send yourself a normal YUI user-message turn, then confirm the middleware ran. With `logging.level: DEBUG` in the
-profile `config.yaml`, `~/.hermes/logs/agent.log` gains one line per pass:
+profile `config.yaml`, `~/.hermes/profiles/<profile>/logs/agent.log` gains one line per pass:
 
 ```
 yui-desire llm_request plugin=yui-desire/0.1.0 outcome=injected reason=None interaction=True trigger=user message platform=… shape=messages/str cache_hit=False api_request_id=… turn_id=… session_id=…
@@ -186,7 +187,11 @@ every running turn, including the one that issues it, so answer first and issue 
 setsid nohup sh -c 'sleep 30; hermes -p <profile> gateway restart' >/dev/null 2>&1 &
 ```
 
-Check: `~/.hermes/profiles/<profile>/logs/gateway.log` gains `api_server connected` after the restart.
+Check: `~/.hermes/profiles/<profile>/logs/gateway.log` gains `api_server connected` after the restart. Then compare the last
+failure line with the time of the restart:
+`grep -n "Failed to load plugin 'yui-desire'" ~/.hermes/profiles/<profile>/logs/agent.log | tail -1`.
+A line dated after the restart means the load failed, and the reason follows the colon. With `HERMES_PLUGINS_DEBUG=1` set
+as an environment variable of the process that runs the gateway, the traceback follows the warning.
 
 ## Helper commands
 
