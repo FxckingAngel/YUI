@@ -22,7 +22,8 @@ const BASH =
 
 function expectLinkOrWindowsCopy(path: string): void {
   const stat = lstatSync(path);
-  if (process.platform !== "win32") expect(stat.isSymbolicLink()).toBe(true);
+  if (stat.isSymbolicLink()) return;
+  expect(process.platform).toBe("win32");
   expect(stat.isFile()).toBe(true);
 }
 
