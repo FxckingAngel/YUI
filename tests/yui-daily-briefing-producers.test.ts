@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -35,6 +35,42 @@ function run(spool: string, args: string[], stdin = ""): Result {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
+function runAsync(spool: string, source: string, input: unknown): Promise<Result> {
+  return new Promise((resolve) => {
+    const child = spawn(PYTHON, [SCRIPT, "--spool", spool, "write", "--source", source]);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => (stdout += chunk));
+    child.stderr.on("data", (chunk: string) => (stderr += chunk));
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+    child.stdin.end(typeof input === "string" ? input : JSON.stringify(input));
+  });
+}
+
+async function holdLockOnWindows(spool: string): Promise<() => void> {
+  if (process.platform !== "win32") return () => {};
+  const probe = [
+    "import importlib.util, sys, time",
+    "spec = importlib.util.spec_from_file_location('briefing', sys.argv[2])",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "with module.lock(sys.argv[1]):",
+    "    print('locked', flush=True)",
+    "    time.sleep(11)",
+  ].join("\n");
+  const child = spawn(PYTHON, ["-c", probe, spool, SCRIPT]);
+  await new Promise<void>((resolve, reject) => {
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      if (chunk.includes("locked")) resolve();
+    });
+    child.on("error", reject);
+  });
+  return () => child.kill();
+}
+
 function write(spool: string, source: string, input: unknown): Result {
   const stdin = typeof input === "string" ? input : JSON.stringify(input);
   return run(spool, ["write", "--source", source], stdin);
@@ -62,6 +98,26 @@ function body(markdown: string): string {
 }
 
 describe("briefing.py write", () => {
+  it("serializes concurrent writers and records both files in one ledger", async () => {
+    const spool = tempDir();
+    const release = await holdLockOnWindows(spool);
+    try {
+      const [first, second] = await Promise.all([
+        runAsync(spool, "alpha", GATHER),
+        runAsync(spool, "beta", GATHER),
+      ]);
+      expect(first.status).toBe(0);
+      expect(second.status).toBe(0);
+
+      const files = spoolFiles(spool);
+      expect(files).toHaveLength(2);
+      expect(run(spool, ["mark-spoken", ...files]).status).toBe(0);
+      expect(Object.keys(JSON.parse(read(spool, "spoken.json")))).toEqual(files);
+    } finally {
+      release();
+    }
+  }, 30_000);
+
   it("opens the spool lock on the current platform", () => {
     const spool = tempDir();
     const probe = [

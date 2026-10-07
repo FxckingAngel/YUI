@@ -12,14 +12,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { BASH } from "../command-paths";
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
 const SETUP = join(ROOT, "scripts/worktree-setup.sh");
-const BASH =
-  process.platform === "win32"
-    ? join(process.env.ProgramFiles ?? "C:/Program Files", "Git/bin/bash.exe")
-    : "bash";
-
 function expectLinkOrWindowsCopy(path: string): void {
   const stat = lstatSync(path);
   if (stat.isSymbolicLink()) return;
