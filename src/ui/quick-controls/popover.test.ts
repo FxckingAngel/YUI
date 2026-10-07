@@ -39,6 +39,7 @@ describe("createPopover — focus management", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   function makePopover(isWindow = false) {
@@ -58,6 +59,56 @@ describe("createPopover — focus management", () => {
     };
   }
 
+  it("window variant: Escape runs onClose and closeWindow once and stays open", () => {
+    const onClose = vi.fn();
+    const closeWindow = vi.fn();
+    const pop = createPopover({
+      mount,
+      root: buildRoot(),
+      scrim: document.createElement("div"),
+      bar: null,
+      isWindow: true,
+      closeWindow,
+      onOpen: () => {},
+      onClose,
+    });
+    pop.open();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(closeWindow).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(pop.isOpen()).toBe(true);
+
+    pop.dispose();
+  });
+
+  it("open(anchor) keeps the panel inside the visible height and exposes it to CSS", () => {
+    localStorage.removeItem("yui.quick.pos");
+    vi.stubGlobal("innerHeight", 600);
+    const root = buildRoot();
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 300, height: 200 }),
+    );
+    const pop = createPopover({
+      mount,
+      root,
+      scrim: document.createElement("div"),
+      bar: null,
+      isWindow: false,
+      visibleHeight: () => 300,
+      onOpen: () => {},
+      onClose: () => {},
+    });
+
+    pop.open({ x: 50, y: 500 });
+
+    expect(parseFloat(root.style.top) + 200).toBeLessThanOrEqual(300 - 12);
+    expect(root.style.getPropertyValue("--yui-quick-visible-h")).toBe("276px");
+
+    pop.dispose();
+  });
+
   it("open() moves focus to the first focusable control inside root", () => {
     const trigger = document.createElement("button");
     trigger.type = "button";
@@ -69,6 +120,18 @@ describe("createPopover — focus management", () => {
 
     expect(root.contains(document.activeElement)).toBe(true);
     expect((document.activeElement as HTMLElement).textContent).toBe("first");
+
+    pop.dispose();
+  });
+
+  // A pointer-opened panel must not open with a lit ring; the ring comes back on the first Tab.
+  it("open() moves focus without a visible focus ring", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const { root, pop } = makePopover();
+    pop.open();
+
+    expect(focus).toHaveBeenLastCalledWith(expect.objectContaining({ focusVisible: false }));
+    expect(focus.mock.contexts.at(-1)).toBe(root.querySelector("button"));
 
     pop.dispose();
   });
@@ -100,6 +163,47 @@ describe("createPopover — focus management", () => {
     expect(document.activeElement).toBe(first);
 
     first.focus();
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+    expect(document.activeElement).toBe(last);
+
+    pop.dispose();
+  });
+
+  it("skips roving-tabindex members Tab never reaches — open() and the trap land on the roving stop", () => {
+    const root = document.createElement("div");
+    root.className = "yui-quick";
+    const [skippedFirst, stop, last, skippedLast] = [
+      "skipped-first",
+      "stop",
+      "last",
+      "skipped-last",
+    ].map((name) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = name;
+      return b;
+    });
+    skippedFirst.tabIndex = -1;
+    skippedLast.tabIndex = -1;
+    root.append(skippedFirst, stop, last, skippedLast);
+    const pop = createPopover({
+      mount,
+      root,
+      scrim: document.createElement("div"),
+      bar: null,
+      isWindow: false,
+      onOpen: () => {},
+      onClose: () => {},
+    });
+    pop.open();
+    expect(document.activeElement).toBe(stop);
+
+    last.focus();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    expect(document.activeElement).toBe(stop);
+
     document.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
     );

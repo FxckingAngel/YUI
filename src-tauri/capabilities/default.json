@@ -7,9 +7,7 @@
   ],
   "permissions": [
     "core:default",
-    "core:window:allow-start-dragging",
     "core:window:allow-set-ignore-cursor-events",
-    "core:window:allow-set-cursor-position",
     "core:window:allow-set-size",
     "core:window:allow-set-position",
     "core:window:allow-show",
@@ -21,8 +19,14 @@
     "cors-fetch:default",
     "log:default",
     "dialog:allow-open",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
-    "global-shortcut:allow-unregister-all"
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "http://*" },
+        { "url": "https://*" },
+        { "url": "mailto:*" },
+        { "url": "tel:*" }
+      ]
+    }
   ]
 }

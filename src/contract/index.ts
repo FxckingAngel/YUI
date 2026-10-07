@@ -8,7 +8,6 @@ export type {
   // Flat system-message context (client → backend each turn)
   ClientContext,
   ControlEnvelope,
-  CueMeta,
   // Emotion
   EmotionId,
   EmotionRegistry,
@@ -20,6 +19,7 @@ export type {
   ExpressArgs,
   // Latest frontmost-window sample reported each turn
   FrontmostState,
+  GuideKey,
   InputContext,
   InterruptPolicy,
   // Motion
@@ -40,6 +40,7 @@ export type {
   ToolStatus,
   // Dispatcher-layer metadata
   TriggerMeta,
+  TtsProviderName,
   TurnEnded,
   Usage,
   WindowRect,

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * not_configured affordance, end to end: the inline input error carries a button
- * that opens the quick-controls panel on the Advanced tab (real surfaces + real panel).
+ * that opens the quick-controls panel on the Connection tab (real surfaces + real panel).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,9 +9,10 @@ import { setLocale } from "../i18n";
 import { createQuickControls } from "../quick-controls/quick-controls";
 import { defaultQcArgs } from "../quick-controls/test-helpers";
 import { createSurfaces } from "../surfaces/surfaces";
+import { noTool } from "../surfaces/test-helpers";
 import { turnErrorFixAction, turnErrorMessage } from "./turn-error";
 
-describe("not_configured → open the Advanced tab", () => {
+describe("not_configured → open the Connection tab", () => {
   let mount: HTMLElement;
 
   beforeEach(() => {
@@ -32,8 +33,8 @@ describe("not_configured → open the Advanced tab", () => {
     setLocale("en");
   });
 
-  it("clicking the inline error's button opens quick controls on Advanced", () => {
-    const surfaces = createSurfaces({ mount });
+  it("clicking the inline error's button opens quick controls on Connection", () => {
+    const surfaces = createSurfaces({ tool: noTool, mount });
     const quickControls = createQuickControls(defaultQcArgs(mount));
 
     // The bootstrap wiring: message + optional fix action for the failed turn.
@@ -50,10 +51,10 @@ describe("not_configured → open the Advanced tab", () => {
     button.click();
 
     expect(quickControls.isOpen()).toBe(true);
-    const adv = quickControls.el.querySelector<HTMLButtonElement>("#yui-tab-adv")!;
-    expect(adv.getAttribute("aria-selected")).toBe("true");
+    const conn = quickControls.el.querySelector<HTMLButtonElement>("#yui-tab-conn")!;
+    expect(conn.getAttribute("aria-selected")).toBe("true");
     expect(
-      quickControls.el.querySelector<HTMLElement>(`#${adv.getAttribute("aria-controls")}`)!.hidden,
+      quickControls.el.querySelector<HTMLElement>(`#${conn.getAttribute("aria-controls")}`)!.hidden,
     ).toBe(false);
 
     quickControls.dispose();
@@ -61,7 +62,7 @@ describe("not_configured → open the Advanced tab", () => {
   });
 
   it("failures the panel cannot fix render no affordance", () => {
-    const surfaces = createSurfaces({ mount });
+    const surfaces = createSurfaces({ tool: noTool, mount });
 
     surfaces.showInputError(
       turnErrorMessage("network_drop")!,

@@ -5,13 +5,14 @@
  * user typed/attached. No brain, persona, or mode branching lives here.
  */
 
-import type { AttachmentLimits } from "../../config/load";
-import type { InputErrorAction } from "../../io/bridge/message-remote";
+import type { AttachmentLimits } from "../../config/validators/guardrails";
+import type { InputErrorAction } from "../../io/bridge/message/message-remote";
 import { subscribe as subscribeLocale, t } from "../i18n";
+import { type ActionButton, createActionButton, type MicPort } from "./action-button";
 import { downscaleToJpeg } from "./image-resize";
 
 interface TextInput {
-  /** Hotkey summon — slide up + focus; a no-op while the input is already open. */
+  /** Hotkey summon — slide up + focus; a no-op while the input is already open. A persistent input only takes focus. */
   summonInput(): void;
   /** Close the input. */
   dismissInput(): void;
@@ -30,8 +31,8 @@ interface TextInput {
   showInputError(message: string, action?: InputErrorAction): void;
   /** Apply the configured attach-time caps (configs/guardrails.json → attachments). */
   setAttachmentLimits(limits: AttachmentLimits): void;
-  /** Toggle the input disabled (e.g. while processing). When disabled, field disabled + pending dimming. */
-  setInputEnabled(enabled: boolean): void;
+  /** Puts a sent message back into an open, empty composer, attachments included; a closed composer or one holding a draft is left alone. */
+  restoreInput(text: string, images: string[]): void;
   /**
    * Set the input's bottom offset (px) for tracking the character's feet. Overrides
    * the CSS `bottom: var(--yui-input-bottom, 4%)` in pixels. null clears the var,
@@ -67,7 +68,10 @@ export function createTextInput(
   { formEl, field, errorEl, trayEl, attachBtn, picker, sendBtn }: TextInputElements,
   bubble: TextInputBubbleAnchor,
   onOpenChange?: (open: boolean) => void,
+  options?: { persistentInput?: boolean; mic?: MicPort },
 ): TextInput {
+  // Always shown, never summoned or dismissed: the button sends and Enter is a newline.
+  const persistent = options?.persistentInput ?? false;
   const submitHandlers: Array<(text: string, images: string[]) => void> = [];
   const stopHandlers: Array<() => void> = [];
   const attachments: string[] = [];
@@ -82,6 +86,15 @@ export function createTextInput(
   let busy = false;
   // Input bottom offset (px) — updated by setInputAnchor, used to lift the bubble while the input is open.
   let inputBottomPx = DEFAULT_INPUT_BOTTOM_PX;
+  const actionButton: ActionButton = createActionButton({
+    button: sendBtn,
+    busy: () => busy,
+    hasContent: () => field.value.trim() !== "" || attachments.length > 0 || inFlight > 0,
+    mic: options?.mic,
+    onStop: () => {
+      for (const cb of stopHandlers) cb();
+    },
+  });
 
   // While the input is open, lift the bubble above it to prevent overlap.
   // Bubble bottom = input bottom + input height + gap. Even if the feet anchor changes each frame,
@@ -98,10 +111,14 @@ export function createTextInput(
   }
 
   function summonInput(): void {
-    // Idempotent: a re-summon on an open input must not reset error/pending state or replay the reveal.
+    if (persistent) {
+      field.focus();
+      return;
+    }
+    // Idempotent: a re-summon on an open input must not reset the error state or replay the reveal.
     if (isInputOpen()) return;
     formEl.hidden = false;
-    formEl.classList.remove("is-error", "is-pending");
+    formEl.classList.remove("is-error");
     errorEl.textContent = "";
     fitField();
     requestAnimationFrame(() => {
@@ -112,6 +129,10 @@ export function createTextInput(
   }
 
   function dismissInput(): void {
+    if (persistent) {
+      field.blur();
+      return;
+    }
     formEl.classList.remove("is-open");
     field.blur();
     const onEnd = (e: TransitionEvent): void => {
@@ -123,7 +144,7 @@ export function createTextInput(
         // Measuring is 0px while hidden — summon refits.
         field.style.height = "";
         clearAttachments();
-        formEl.classList.remove("is-error", "is-pending");
+        formEl.classList.remove("is-error");
         errorEl.textContent = "";
         bubble.resetPosition();
         onOpenChange?.(false);
@@ -146,7 +167,6 @@ export function createTextInput(
   function showInputError(message: string, action?: InputErrorAction): void {
     // Shown first — the alert only announces content inserted while it is in the tree.
     formEl.classList.add("is-error");
-    formEl.classList.remove("is-pending");
     errorEl.textContent = message;
     if (action) {
       const button = document.createElement("button");
@@ -195,6 +215,8 @@ export function createTextInput(
     inFlight = 0;
     epoch++;
     trayEl.replaceChildren();
+    actionButton.refresh();
+    if (!formEl.hidden) liftBubbleAboveInput();
   }
 
   function addFiles(files: FileList | File[]): void {
@@ -218,6 +240,7 @@ export function createTextInput(
         continue;
       }
       inFlight++;
+      actionButton.refresh();
       const batch = epoch;
       void downscaleToJpeg(file)
         .then((url) => {
@@ -226,7 +249,9 @@ export function createTextInput(
           addChip(url);
         })
         .finally(() => {
-          if (batch === epoch) inFlight--;
+          if (batch !== epoch) return;
+          inFlight--;
+          actionButton.refresh();
         });
     }
   }
@@ -236,19 +261,26 @@ export function createTextInput(
     chip.className = "yui-chip";
     const img = document.createElement("img");
     img.src = dataUrl;
-    img.alt = ""; // Decorative thumbnail — the chip's × button conveys the attachment's presence.
+    img.alt = ""; // Decorative thumbnail — the chip's remove button conveys the attachment's presence.
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "yui-chip__remove";
-    remove.textContent = "×";
+    remove.innerHTML =
+      `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">` +
+      `<path d="M7 7l10 10M17 7L7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` +
+      `</svg>`;
     remove.setAttribute("aria-label", t("aria.remove_attachment"));
     remove.addEventListener("click", () => {
       const idx = Array.from(trayEl.children).indexOf(chip);
       if (idx !== -1) attachments.splice(idx, 1);
       chip.remove();
+      actionButton.refresh();
+      if (!formEl.hidden) liftBubbleAboveInput();
     });
     chip.append(img, remove);
     trayEl.append(chip);
+    actionButton.refresh();
+    if (!formEl.hidden) liftBubbleAboveInput();
   }
 
   function onStop(cb: () => void): void {
@@ -261,24 +293,18 @@ export function createTextInput(
     // A turn reaching the backend falsifies a standing error, whatever source started it.
     if (value) clearInputError();
     formEl.classList.toggle("is-running", value);
-    sendBtn.setAttribute("aria-label", value ? t("aria.stop") : t("aria.send"));
+    actionButton.refresh();
   }
 
-  // Single site for these four labels — applied here at construction, and again by
+  // Single site for the static labels — applied here at construction, and again by
   // the same function on locale change (surfaces isn't remounted on locale change).
   function applyLocaleLabels(): void {
     attachBtn.setAttribute("aria-label", t("aria.attach_image"));
     field.placeholder = t("input.placeholder");
     field.setAttribute("aria-label", t("aria.input_field"));
-    sendBtn.setAttribute("aria-label", busy ? t("aria.stop") : t("aria.send"));
   }
   applyLocaleLabels();
   const unsubscribeLocale = subscribeLocale(applyLocaleLabels);
-
-  function setInputEnabled(enabled: boolean): void {
-    field.disabled = !enabled;
-    formEl.classList.toggle("is-pending", !enabled);
-  }
 
   function setInputAnchor(bottomPx: number | null): void {
     if (bottomPx === null) formEl.style.removeProperty("--yui-input-bottom");
@@ -296,18 +322,25 @@ export function createTextInput(
     const images = attachments.slice();
     for (const cb of submitHandlers) cb(text, images);
     clearAttachments();
+    field.value = "";
+    actionButton.refresh();
+    fitField();
+  }
+
+  function restoreInput(text: string, images: string[]): void {
+    if (!isInputOpen() || field.value !== "" || attachments.length > 0 || inFlight > 0) return;
+    field.value = text;
+    actionButton.refresh();
+    for (const url of images) {
+      attachments.push(url);
+      addChip(url);
+    }
+    fitField();
   }
 
   function handleSubmit(e: Event): void {
     e.preventDefault();
     submitCurrent();
-  }
-
-  // Button click while busy = stop (intercepts submit). When idle, passes through as type=submit.
-  function handleSendClick(e: Event): void {
-    if (!busy) return;
-    e.preventDefault();
-    for (const cb of stopHandlers) cb();
   }
 
   function handleFieldKey(e: KeyboardEvent): void {
@@ -316,6 +349,7 @@ export function createTextInput(
       dismissInput();
       return;
     }
+    if (persistent) return;
     // Textarea has no implicit submit; WebKit reports the IME-committing Enter as keyCode 229.
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault();
@@ -362,11 +396,17 @@ export function createTextInput(
     if (e.dataTransfer) addFiles(e.dataTransfer.files);
   }
 
+  if (persistent) {
+    formEl.hidden = false;
+    formEl.classList.add("is-open");
+    fitField();
+  }
+
   formEl.addEventListener("submit", handleSubmit);
-  sendBtn.addEventListener("click", handleSendClick);
   field.addEventListener("keydown", handleFieldKey);
   field.addEventListener("input", clearErrorOnInput);
   field.addEventListener("input", fitField);
+  field.addEventListener("input", actionButton.refresh);
   field.addEventListener("paste", onFieldPaste);
   attachBtn.addEventListener("click", onAttachClick);
   picker.addEventListener("change", onPickerChange);
@@ -377,10 +417,11 @@ export function createTextInput(
   function dispose(): void {
     unsubscribeLocale();
     formEl.removeEventListener("submit", handleSubmit);
-    sendBtn.removeEventListener("click", handleSendClick);
+    actionButton.dispose();
     field.removeEventListener("keydown", handleFieldKey);
     field.removeEventListener("input", clearErrorOnInput);
     field.removeEventListener("input", fitField);
+    field.removeEventListener("input", actionButton.refresh);
     field.removeEventListener("paste", onFieldPaste);
     attachBtn.removeEventListener("click", onAttachClick);
     picker.removeEventListener("change", onPickerChange);
@@ -400,7 +441,7 @@ export function createTextInput(
     setBusy,
     showInputError,
     setAttachmentLimits,
-    setInputEnabled,
+    restoreInput,
     setInputAnchor,
     dispose,
   };

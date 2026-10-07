@@ -21,7 +21,7 @@ The client renders what arrives and judges nothing. Everything the backend must 
 | Delegation list `items` | 50 entries |
 | `done` item kept in the chip after `ended_at` | 30 min |
 | Delegation history kept by the client | 200 items |
-| `done` tool chip held before it dismisses | 1.5 s |
+| `done` state held in the status pill's tool segment before it clears | 1.5 s |
 
 The backend cuts `title` and `summary` to their limits, counting Unicode code points.
 
@@ -194,7 +194,7 @@ Sent once per turn after its last `render`; a turn with no `render` sends it alo
 | `state` | `"running"` when the tool call starts, `"done"` when it returns |
 | `tool_id` | The tool name as the backend knows it |
 
-Sent while the turn runs, once per state change of a tool call. It counts as a frame of the turn for the frame wait and leaves the running state, the thinking motion and speech as they are. A turn may carry none. A `tool_status` for a turn the client did not send shows the tool chip and speaks no tool phrase. A running tool that gets no `done` is cleared by the turn's `turn_end`, and by the socket leaving `ready`.
+Sent while the turn runs, once per state change of a tool call. It counts as a frame of the turn for the frame wait and leaves the running state, the thinking motion and speech as they are. A turn may carry none. A `tool_status` for a turn the client did not send shows the status pill's tool segment and speaks no tool phrase. A running tool that gets no `done` is cleared by the turn's `turn_end`, and by the socket leaving `ready`.
 
 ### `reasoning` (backend → client)
 
@@ -249,4 +249,4 @@ The client keeps the latest list; a `done` item leaves the chip 30 minutes after
 
 ## Logging
 
-A `turn` sent over the socket writes a turn record with `spoke_text: false`. A `render` writes a `push.render` record with `source`, `turn_id`, the segment count, whether any speech played, and whether speech was still owed when the frame arrived. A `render` dropped for a stopped turn is logged as a `render` line with `dropped: "cut_turn"` and `stopped_count`, how many stopped turns are still waiting for their `turn_end`. A `speech` frame writes `push.speech` to the app log with `turn_id` and the segment count; one dropped for a stopped turn also carries `dropped: "cut_turn"` and `stopped_count`. A frame wait that reaches the limit writes `network_stall` with `stage: push_wait`, and a wait the socket leaving `ready` ended writes `network_drop` with the same stage. A `turn_end` writes `push.turn_end` to the app log with `turn_id`. A `stop` that went out writes `push.stop` with the number of turns it named. A `tool_status` frame writes `push.tool_status` with `turn_id`, `state` and `tool_id`; one dropped for a stopped turn carries `dropped: "cut_turn"` and `stopped_count` instead. A frame over the size limit is never sent and is dropped unread on arrival; either case writes `frame_oversize` with `direction`. The app log carries `ws_open`, `ws_ready`, `ws_close` with the close code, and `ws_reconnect` with the delay.
+A `turn` sent over the socket writes a turn record with `spoke_text: false`. A `render` writes a `push.render` record with `source`, `turn_id`, the segment count, whether any speech played, and whether speech was still owed when the frame arrived. A `render` dropped for a stopped turn is logged as a `render` line with `dropped: "cut_turn"` and `stopped_count`, how many stopped turns are still waiting for their `turn_end`. A `speech` frame writes `push.speech` to the app log with `turn_id` and the segment count; one dropped for a stopped turn also carries `dropped: "cut_turn"` and `stopped_count`. Before the turn's first `render`, a frame wait that reaches the limit writes `network_stall` with `stage: push_wait`, and a wait the socket leaving `ready` ended writes `network_drop` with the same stage. After the first `render`, both carry `stage: push_turn_end`, and the turn counts as delivered. A `turn_end` writes `push.turn_end` to the app log with `turn_id`. A `stop` that went out writes `push.stop` with the number of turns it named. A `tool_status` frame writes `push.tool_status` with `turn_id`, `state` and `tool_id`; one dropped for a stopped turn carries `dropped: "cut_turn"` and `stopped_count` instead. A frame over the size limit is never sent and is dropped unread on arrival; either case writes `frame_oversize` with `direction`. The app log carries `ws_open`, `ws_ready`, `ws_close` with the close code, and `ws_reconnect` with the delay.

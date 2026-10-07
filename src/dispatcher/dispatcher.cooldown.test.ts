@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PeekConfig, TapConfig } from "../config/load";
+import type { PeekConfig, TapConfig } from "../config/validators/avatar/types";
 import type { Logger } from "../logger";
 import type { BackendCaller } from "./backend/backend-caller";
 import { createEventBus, type EventBus } from "./core/event-bus";
@@ -150,7 +150,6 @@ describe("dispatcher — cooldown state mirror (§6.3/§9)", () => {
         source: "user_input_source",
         event_name: "user.drag_start",
         ts: NOW + 100,
-        hint_tier: 1,
         dnd_override: false,
       }),
     );

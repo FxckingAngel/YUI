@@ -2,6 +2,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
+import { backendProxy } from "./scripts/dev-backend-proxy.mjs";
 import { resolveVitePort } from "./scripts/dev-port.mjs";
 
 // Dev static serving: /vrms/* → resources/vrms/, /configs/* → configs/.
@@ -55,26 +56,12 @@ export default defineConfig(() => ({
     strictPort: true,
     host: "127.0.0.1",
     watch: {
-      // Rust rebuilds replace locked DLLs under this directory on Windows.
-      ignored: ["**/src-tauri/target/**"],
-    },
-    // Same-origin /__hermes → dev proxy to the Responses backend (avoids web chat CORS preflight, SSE streaming).
-    // :8643 stays in sync with chat_base_url in configs/endpoints.json.
-    proxy: {
-      "/__hermes": {
-        target: "http://localhost:8643",
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/__hermes/, ""),
-        // A backend may allowlist-check the Origin → worktree dev ports other than 1420 get 403.
-        // changeOrigin only changes Host, so overwrite Origin with an allowed value to let any port through.
-        configure: (proxy) => {
-          const origin = process.env.YUI_HERMES_ORIGIN ?? "http://localhost:1420";
-          proxy.on("proxyReq", (proxyReq) => proxyReq.setHeader("origin", origin));
-        },
-      },
+      // Rust rebuilds replace locked DLLs under target/ on Windows; Gradle writes build reports under gen/.
+      ignored: ["**/src-tauri/target/**", "**/src-tauri/gen/**"],
     },
   },
   plugins: [
+    backendProxy(),
     serveDir("/vrms", "resources/vrms"),
     serveDir("/configs", "configs"),
     serveDir("/vad", "public/vad"),
@@ -86,6 +73,7 @@ export default defineConfig(() => ({
         settings: resolve(__dirname, "settings.html"),
         message: resolve(__dirname, "message.html"),
         devtools: resolve(__dirname, "devtools.html"),
+        phone: resolve(__dirname, "phone.html"),
       },
     },
   },

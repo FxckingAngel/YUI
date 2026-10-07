@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { agentTriggerableMotionIds } from "../io/chat/broker-client";
 import { validateAvatar } from "./validators/avatar";
 import { validateEndpoints } from "./validators/endpoints";
 import { validateGuardrails } from "./validators/guardrails";
@@ -29,6 +28,10 @@ describe("configs/endpoints.json", () => {
     expect(ep.tts_model).toBe("irodori-tts");
   });
 
+  it("selects Irodori as the TTS provider", () => {
+    expect(ep.tts_provider).toBe("irodori");
+  });
+
   it("carries the chat protocol selection", () => {
     expect(ep.chat_api).toBe("chat_completions");
   });
@@ -40,6 +43,10 @@ describe("configs/endpoints.json", () => {
     expect(ep.chat_instructions).toContain("emotion_id");
     expect(ep.chat_instructions).toContain("motion_id");
     expect(ep.chat_instructions).toContain("emotion_text");
+  });
+
+  it("keeps chat_instructions provider-neutral: no preferred caption language", () => {
+    expect(ep.chat_instructions).not.toMatch(/japanese/i);
   });
 
   it("passes the real endpoints config through validation", () => {
@@ -179,7 +186,6 @@ describe("configs/guardrails.json", () => {
     expect(g.debounce_ms.screen_watcher).toBe(5000);
     expect(g.rate_limit.window_ms).toBe(3600000);
     expect(g.rate_limit.tier2_max).toBe(24);
-    expect(g.rate_limit.tier3_max).toBe(2);
     expect(g.rate_limit.overall_max).toBe(40);
     expect(g.rate_limit.cooldown_ms).toBe(300000);
   });
@@ -436,12 +442,6 @@ describe("configs/motions.json", () => {
     expect(published).not.toContain("walk");
     expect(published).not.toContain("climb_up_done");
     expect(published).not.toContain("climb_down_landing");
-  });
-
-  it("keeps walk out of the agent-triggerable vocabulary the broker publishes", () => {
-    expect(agentTriggerableMotionIds(validateMotions("configs/motions.json", m))).not.toContain(
-      "walk",
-    );
   });
 
   it("keeps falling below the drag clip so a pickup takes the body mid-fall", () => {

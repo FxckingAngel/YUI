@@ -15,7 +15,7 @@ import {
   CAMERA_POLAR_DEFAULT,
   CAMERA_POLAR_FREE_MAX,
   CAMERA_POLAR_FREE_MIN,
-} from "../../renderer/geometry/camera-fit";
+} from "../../renderer/camera/camera-fit";
 import type { CameraSettings, CameraStorage } from "./camera-settings";
 import {
   CAMERA_ZOOM_DEFAULT,
@@ -343,6 +343,30 @@ describe("createCameraSettings — resetOrbit", () => {
     const cb = vi.fn();
     store.subscribe(cb);
     store.resetOrbit();
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe("createCameraSettings — resetView", () => {
+  it("restores zoom, azimuth and polar in one notification", () => {
+    const store = createCameraSettings();
+    store.setZoom(2);
+    store.setAzimuth(1.2);
+    store.setPolar(40 * DEG);
+    const cb = vi.fn();
+    store.subscribe(cb);
+    store.resetView();
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(store.get().zoom).toBe(CAMERA_ZOOM_DEFAULT);
+    expect(store.get().azimuth).toBe(CAMERA_AZIMUTH_DEFAULT);
+    expect(store.get().polar).toBeCloseTo(CAMERA_POLAR_DEFAULT, 12);
+  });
+
+  it("is a no-op (no notify) when already at the defaults", () => {
+    const store = createCameraSettings();
+    const cb = vi.fn();
+    store.subscribe(cb);
+    store.resetView();
     expect(cb).not.toHaveBeenCalled();
   });
 });

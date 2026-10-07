@@ -46,6 +46,11 @@ def test_a_cue_names_the_sentence_it_is_placed_before():
     assert "opening words" in fields["properties"]["sentence"]["description"]
 
 
+def test_the_caption_description_names_no_language():
+    caption = cues_property(Vocabulary())["items"]["properties"]["caption"]
+    assert "japanese" not in caption["description"].lower()
+
+
 def test_the_description_asks_for_one_call_per_reply():
     description = tools.build_schema(Vocabulary())["description"]
     assert "once per reply" in description
@@ -77,6 +82,12 @@ def test_enum_mode_puts_the_tag_table_in_the_schema():
 def test_free_mode_leaves_the_tag_open():
     fields = cues_property(Vocabulary())["items"]
     assert "enum" not in fields["properties"]["emotion_text"]
+
+
+def test_free_mode_asks_for_a_few_plain_words_not_emoji():
+    description = cues_property(Vocabulary())["items"]["properties"]["emotion_text"]["description"]
+    assert "words" in description
+    assert "no emoji" in description
 
 
 def test_the_handler_buffers_every_gated_cue_with_its_sentence():

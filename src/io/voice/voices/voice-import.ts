@@ -6,9 +6,9 @@
  * split lets a naming row sit between picking and copying: name the voice BEFORE any
  * file touches disk, so cancelling the naming step needs no cleanup.
  *
- * Thin layer over the dialog plugin + the Rust `import_voice_file` / `remove_user_voice`
- * commands. Deps are injectable so tests never touch a real Tauri runtime; the real
- * Tauri APIs are lazily imported (non-Tauri/test envs never load them).
+ * Thin layer over the dialog plugin + the Rust `import_voice_file` / `rename_user_voice` /
+ * `remove_user_voice` commands. Deps are injectable so tests never touch a real Tauri runtime;
+ * the real Tauri APIs are lazily imported (non-Tauri/test envs never load them).
  */
 
 import {
@@ -74,8 +74,8 @@ interface ImportedVoice {
 
 /**
  * Copy `srcPath` into app-data under `name` and return its SpeakerOption (source:"user").
- * The native side sanitizes `name` into the id it actually used (and overwrites any
- * existing voice of that id) — the returned id reflects that, never the raw input. The
+ * The native side sanitizes `name` into the id it actually used and refuses an id that
+ * already has a voice — the returned id reflects that, never the raw input. The
  * label keeps the typed name so a collapse (e.g. a non-ASCII name → a hashed ASCII id) doesn't
  * silently discard what the user typed; it falls back to the id only when the name is blank.
  */
@@ -91,6 +91,17 @@ export async function copyVoiceFile(
   });
   const ref_url = await d.resolveRefUrl(refPath);
   return { id, label: name.trim() || id, ref_url, source: "user" };
+}
+
+/** Move an imported voice's clip in app-data from id `from` to id `to`; returns its new ref_url. */
+export async function renameUserVoice(
+  from: string,
+  to: string,
+  deps?: VoiceCopyDeps,
+): Promise<string> {
+  const d = deps ?? (await defaultCopyDeps());
+  const { refPath } = await d.invoke<ImportedVoice>("rename_user_voice", { from, to });
+  return d.resolveRefUrl(refPath);
 }
 
 /** Delete an imported voice's file from app-data. Idempotent on the native side. */

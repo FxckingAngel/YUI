@@ -39,8 +39,13 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
   coerceUser: (v: unknown) => T | null;
   /** Whether an option matches the manifest default (resolve()'s second-priority match). */
   isDefault: (option: T, defaultValue: string) => boolean;
+  /** Field naming a user option's owner; only the active owner's user options are listed. */
+  ownerKey?: keyof T & string;
+  /** The active owner until setOwner moves it. */
+  owner?: string;
 }) {
-  const { storage, userStorage, synthesize, coerceUser, isDefault } = opts;
+  const { storage, userStorage, synthesize, coerceUser, isDefault, ownerKey } = opts;
+  let owner = opts.owner;
 
   // The manifest (options + defaultValue) is mutable since setManifest can update it.
   // When available is missing or empty, synthesize a single entry from fallback — UNLESS fallback
@@ -60,6 +65,11 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
   }
   let userOptions: T[] = [];
 
+  // Another owner's user options stay stored but are neither listed nor resolvable.
+  function isListedUser(option: T): boolean {
+    return ownerKey === undefined || option[ownerKey] === owner;
+  }
+
   // Union-merge userStorage list into in-memory userOptions — discard bundled id collisions,
   // dedupe by id (reloaded entries win). Prevents lost updates from other windows.
   function mergeUserOptions(): void {
@@ -72,7 +82,7 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
     }
     for (const raw of persisted) {
       const opt = coerceUser(raw);
-      if (!opt || isBundledId(opt.id)) continue;
+      if (!opt || (isListedUser(opt) && isBundledId(opt.id))) continue;
       const idx = userOptions.findIndex((u) => u.id === opt.id);
       if (idx >= 0) userOptions[idx] = opt;
       else userOptions.push(opt);
@@ -82,11 +92,17 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
 
   // Full list of candidates to resolve: user entries after bundled (no duplicate ids).
   function options(): T[] {
-    return [...bundled, ...userOptions];
+    return [...bundled, ...userOptions.filter(isListedUser)];
   }
 
   function hasId(id: string): boolean {
     return options().some((o) => o.id === id);
+  }
+
+  // An override survives while it names a listed option or another owner's user option, so the
+  // owner's return restores it.
+  function keepsOverride(id: string): boolean {
+    return hasId(id) || userOptions.some((u) => u.id === id);
   }
 
   // Load stored override, treat stale/removed ids as absent.
@@ -131,10 +147,20 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
       return options().map((o) => ({ ...o }));
     },
 
-    /** Add/update imported user option. Reject bundled id collisions; force source to "user". */
+    /** Every imported user option, of every owner. */
+    listUser(): T[] {
+      return userOptions.map((o) => ({ ...o }));
+    },
+
+    /** Add/update imported user option. Reject bundled id collisions; force source to "user".
+     *  An option naming no owner belongs to the active one, and an id another owner holds is refused. */
     addUserOption(opt: T): void {
-      if (isBundledId(opt.id)) return; // bundled always wins
       const next = { ...opt, source: "user" } as T;
+      if (ownerKey !== undefined) {
+        if (next[ownerKey] === undefined) (next as Record<string, unknown>)[ownerKey] = owner;
+        if (userOptions.some((u) => u.id === next.id && u[ownerKey] !== next[ownerKey])) return;
+      }
+      if (isListedUser(next) && isBundledId(next.id)) return; // a listed bundled id always wins
       const idx = userOptions.findIndex((o) => o.id === next.id);
       if (idx >= 0) userOptions[idx] = next;
       else userOptions.push(next);
@@ -196,10 +222,11 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
       notify();
     },
 
-    reset(): void {
-      if (override === null) return;
-      override = null;
-      storage?.save(null);
+    /** Moves the active owner: its user options are listed and resolvable, every other owner's are
+     *  not — a list change even when the active id stays put, so it always notifies. */
+    setOwner(next: string): void {
+      if (next === owner) return;
+      owner = next;
       notify();
     },
 
@@ -209,9 +236,9 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
       const before = resolve().id;
       defaultValue = next.defaultValue;
       bundled = normalize(next.available, defaultValue);
-      // Drop user options colliding with new bundled ids (bundled wins).
-      userOptions = userOptions.filter((u) => !isBundledId(u.id));
-      if (override !== null && !hasId(override)) override = null;
+      // Drop listed user options colliding with new bundled ids (bundled wins).
+      userOptions = userOptions.filter((u) => !(isListedUser(u) && isBundledId(u.id)));
+      if (override !== null && !keepsOverride(override)) override = null;
       if (resolve().id === before) return;
       notify();
     },
@@ -228,7 +255,7 @@ export function createSelectionStore<T extends SelectionOption>(opts: {
         } catch {
           loaded = override;
         }
-        override = loaded !== null && hasId(loaded) ? loaded : null;
+        override = loaded !== null && keepsOverride(loaded) ? loaded : null;
       }
       if (resolve().id === before) return;
       notify();

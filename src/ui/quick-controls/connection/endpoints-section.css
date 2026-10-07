@@ -1,0 +1,162 @@
+/* ── Connection tab — per-service sections (chat · STT · TTS · broker), rows from quick-controls.css ── */
+
+/* State text at a section title's right. */
+.yui-endpoints__hint {
+  flex: none;
+  font-size: var(--yui-fs-sub);
+  font-weight: 500;
+  color: var(--yui-text-dim);
+}
+
+/* Endpoint URL field's numeric-URL variant of the shared .yui-ep-input (base in ../controls.css). */
+.yui-ep-input--url {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── API key field — the shared field box with inline show/clear icons ── */
+.yui-chatkey__wrap {
+  display: flex;
+  align-items: center;
+  padding-right: 0.18rem;
+}
+
+.yui-chatkey__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.yui-chatkey__toggle,
+.yui-chatkey__clear {
+  flex: 0 0 auto;
+  width: 1.55rem;
+  height: 1.55rem;
+}
+
+.yui-chatkey__toggle[aria-pressed="true"] {
+  color: var(--yui-accent);
+}
+
+/* ── yui-select — dropdown without OS chrome (type · provider) ── */
+.yui-select {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  height: 2rem;
+  margin: 0;
+  padding: 0 1.75rem 0 0.625rem;
+  font: inherit;
+  font-size: var(--yui-fs-body);
+  color: var(--yui-text);
+  background-color: var(--yui-field);
+  border: 1px solid transparent;
+  border-radius: var(--yui-radius-control);
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23b9ae99' stroke-width='1.4' stroke-linecap='round'><path d='M3 4.5 6 7.5 9 4.5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  transition:
+    border-color var(--yui-dur-fast) var(--yui-ease),
+    box-shadow var(--yui-dur-fast) var(--yui-ease);
+}
+
+.yui-select:hover {
+  border-color: var(--yui-edge);
+}
+
+.yui-select:focus-visible {
+  outline: none;
+  border-color: var(--yui-accent);
+  box-shadow: 0 0 0 1px var(--yui-accent-soft);
+}
+
+.yui-select--single {
+  cursor: default;
+  color: var(--yui-text-dim);
+  background-image: none;
+  padding-right: 0.625rem;
+}
+
+.yui-select--single:hover {
+  border-color: transparent;
+}
+
+/* Push connection line — a row in the chat group, a coloured dot before the state.
+   The session section's own lost line wears the same dot, in Ember Red throughout. */
+.yui-chat-status,
+.yui-session__deleg-lost {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  font-size: var(--yui-fs-sub);
+  line-height: 1.35;
+  color: var(--yui-text-mute);
+}
+
+/* display: flex beats the UA's [hidden] rule, so hide it explicitly. */
+.yui-chat-status[hidden],
+.yui-session__deleg-lost[hidden] {
+  display: none;
+}
+
+.yui-chat-status {
+  margin: 0;
+  padding: 0.625rem 0.875rem;
+}
+
+.yui-chat-status__dot,
+.yui-session__deleg-lost-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yui-text-mute);
+}
+
+.yui-chat-status.is-ready .yui-chat-status__dot {
+  background: var(--yui-ok);
+  box-shadow: 0 0 0 3px var(--yui-ok-soft);
+}
+
+.yui-chat-status.is-waiting .yui-chat-status__dot {
+  background: var(--yui-accent);
+  box-shadow: 0 0 0 3px var(--yui-accent-faint);
+}
+
+.yui-chat-status.is-failed .yui-chat-status__dot,
+.yui-session__deleg-lost-dot {
+  background: var(--yui-danger);
+  box-shadow: 0 0 0 3px var(--yui-danger-faint);
+}
+
+/* The way out of a stalled connection, at the row's right end — the panel's text button. */
+.yui-chat-status__action {
+  margin-left: auto;
+  padding: 0.125rem 0.25rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--yui-text-dim);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--yui-dur-fast) var(--yui-ease);
+}
+
+.yui-chat-status__action:hover {
+  color: var(--yui-accent);
+}
+
+.yui-chat-status__action:active {
+  transform: translateY(1px);
+}
+
+.yui-chat-status__action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--yui-accent-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yui-chat-status__action:active {
+    transform: none;
+  }
+}

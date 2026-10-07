@@ -5,7 +5,7 @@ import { CAMERA_ORBIT_SENSITIVITY } from "../../settings/avatar/camera-settings"
 // assert the disposer it returns is registered.
 const { initDrag } = vi.hoisted(() => ({ initDrag: vi.fn() }));
 
-vi.mock("../../io/window/pet/drag", () => ({ initDrag }));
+vi.mock("../../io/window/pet/gesture/window-drag", () => ({ initDrag }));
 
 import { createPatGesture, wireStageGestures } from "./wire-gestures";
 
@@ -101,7 +101,6 @@ describe("wireStageGestures", () => {
       stage: {} as HTMLElement,
       bus: bus as never,
       renderer: {} as never,
-      ambient: {} as never,
       getConfig: () =>
         ({
           avatar: {
@@ -137,14 +136,12 @@ describe("wireStageGestures", () => {
 
     const result = s.dragOpts.onDragStart!();
 
-    expect(s.order).toEqual(["setDragging:true", "cancel", "suspend", "noteUserDrag"]);
+    expect(s.order).toEqual(["setDragging:true", "noteUserDrag", "cancel", "suspend"]);
     expect(s.bus.push).toHaveBeenCalledTimes(1);
     expect(s.bus.push).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "os_event_watcher",
         event_name: "user.drag_start",
-        hint_tier: 1,
-        dnd_override: true,
       }),
     );
     // The drag start hands the OS drag the still-unparking travel's abort promise itself.
@@ -162,8 +159,6 @@ describe("wireStageGestures", () => {
       expect.objectContaining({
         source: "os_event_watcher",
         event_name: "user.drag_end",
-        hint_tier: 1,
-        dnd_override: true,
       }),
     );
   });

@@ -7,8 +7,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PeekConfig, TapConfig } from "../config/load";
 import { guardrailsFixture } from "../config/load-test-helpers";
+import type { PeekConfig, TapConfig } from "../config/validators/avatar/types";
 import type { EndpointsConfig } from "../contract";
 import { createBackendCaller } from "./backend/backend-caller";
 import { type BusEnvelope, createEventBus, type EventBus } from "./core/event-bus";
@@ -82,7 +82,6 @@ beforeEach(() => {
       rate_limit: {
         window_ms: 3_600_000,
         tier2_max: 1000,
-        tier3_max: 1000,
         overall_max: 1000,
         cooldown_ms: 300_000,
       },

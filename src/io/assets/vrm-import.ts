@@ -6,8 +6,9 @@
  * Tauri APIs are lazily imported (non-Tauri/test envs never load them).
  */
 
-import type { AvatarOption } from "../../config/load";
+import type { AvatarOption } from "../../config/validators/avatar/types";
 import { loadInvoke, loadOpenDialog, type OpenResult, pickedPath } from "./user-asset-import";
+import type { createVrmSelection } from "./vrm-selection";
 
 export interface VrmImportDeps {
   /** `@tauri-apps/plugin-dialog` open. */
@@ -40,9 +41,13 @@ interface ImportedVrm {
 
 /**
  * Open the VRM picker, copy the chosen file into app-data, and return its
- * AvatarOption (source:"user"). Returns null when the picker is cancelled.
+ * AvatarOption (source:"user"). Returns null when the picker is cancelled. The bundled ids
+ * are reserved, so an imported file never takes one.
  */
-export async function importVrmFromFile(deps?: VrmImportDeps): Promise<AvatarOption | null> {
+export async function importVrmFromFile(
+  selection: Pick<ReturnType<typeof createVrmSelection>, "list">,
+  deps?: VrmImportDeps,
+): Promise<AvatarOption | null> {
   const d = deps ?? (await defaultDeps());
   const result = await d.openDialog({
     multiple: false,
@@ -53,7 +58,14 @@ export async function importVrmFromFile(deps?: VrmImportDeps): Promise<AvatarOpt
   const srcPath = pickedPath(result);
   if (srcPath === null) return null;
 
-  const { id, destPath } = await d.invoke<ImportedVrm>("import_vrm_file", { srcPath });
+  const reservedIds = selection
+    .list()
+    .filter((o) => o.source === "bundled")
+    .map((o) => o.id);
+  const { id, destPath } = await d.invoke<ImportedVrm>("import_vrm_file", {
+    srcPath,
+    reservedIds,
+  });
   return { id, label: id, url: d.convertFileSrc(destPath), source: "user" };
 }
 

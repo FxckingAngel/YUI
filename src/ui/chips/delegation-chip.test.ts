@@ -11,14 +11,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./delegation-chip.css", () => ({}));
 
-import { INTERACTIVE_OVERLAY_SELECTORS } from "../../app/stage/wire-stage";
-import { createDelegationsStore } from "../../io/bridge/delegations-store";
-import type { DelegationItem, PushSocketState } from "../../io/chat/push-socket";
+import { createDelegationsStore } from "../../io/bridge/delegations/delegations-store";
+import type { DelegationItem } from "../../io/chat/push/push-frames";
+import type { PushSocketState } from "../../io/chat/push/push-socket";
 import {
   createDelegationChipSettings,
   localStorageDelegationChipStorage,
 } from "../../settings/panels/delegation-chip-settings";
 import { setLocale, t } from "../i18n";
+import { INTERACTIVE_OVERLAY_SELECTORS } from "../surfaces/interactive-overlay";
 import { createDelegationChip } from "./delegation-chip";
 
 const NOW = 1_789_365_900_000;
@@ -370,6 +371,22 @@ describe("createDelegationChip", () => {
     expect(el.hidden).toBe(false);
   });
 
+  // The list is positioned against the wrapper that spans the overlay — never inside the chip
+  // button. Both windows' stylesheets hang off these two direct-child relationships: the
+  // character window pins the list to the wrapper's right edge, and the message window's flow
+  // layout turns the same two children into flex items of the plate row.
+  describe("list geometry contract", () => {
+    it("keeps the list a direct child of .yui-deleg, outside the chip button", () => {
+      const { store } = build();
+      store.replace([running("d-1", 60_000), done("d-2", 60_000)]);
+      chipButton().click();
+
+      expect(listEl().parentElement).toBe(chipEl());
+      expect(listEl().closest("button")).toBeNull();
+      expect([...chipEl().children]).toEqual([chipButton(), listEl()]);
+    });
+  });
+
   // The pet window is click-through passthrough; the window-level hit test only grants OS
   // clicks to rects collected from INTERACTIVE_OVERLAY_SELECTORS. Without a registered
   // selector the DOM handlers never fire, so the chip is two dead changes.
@@ -622,64 +639,6 @@ describe("createDelegationChip", () => {
       chip.setSuppressed(false);
 
       expect(chipEl().hidden).toBe(false);
-    });
-  });
-
-  // The message window closes the list when the reasoning chip's panel opens.
-  describe("closeList / onListOpen", () => {
-    it("closeList() closes an open list", () => {
-      const { store, chip } = build();
-      store.replace([running("d-1", 60_000)]);
-      chipButton().click();
-      expect(listEl().hidden).toBe(false);
-
-      chip.closeList();
-
-      expect(chipButton().getAttribute("aria-expanded")).toBe("false");
-      settle();
-      expect(listEl().hidden).toBe(true);
-    });
-
-    it("closeList() on an already closed list is a no-op", () => {
-      const { store, chip } = build();
-      store.replace([running("d-1", 60_000)]);
-
-      expect(() => chip.closeList()).not.toThrow();
-      expect(chipButton().getAttribute("aria-expanded")).toBe("false");
-      expect(listEl().hidden).toBe(true);
-    });
-
-    it("onListOpen fires once per closed → open transition and stops on unsubscribe", () => {
-      const { store, chip } = build();
-      store.replace([running("d-1", 60_000)]);
-      const onOpen = vi.fn();
-      const off = chip.onListOpen(onOpen);
-
-      chipButton().click();
-      expect(onOpen).toHaveBeenCalledTimes(1);
-      chipButton().click();
-      settle();
-      chipButton().click();
-      expect(onOpen).toHaveBeenCalledTimes(2);
-
-      off();
-      chipButton().click();
-      settle();
-      chipButton().click();
-      expect(onOpen).toHaveBeenCalledTimes(2);
-    });
-
-    it("fires onListOpen no more after dispose", () => {
-      const { store, chip } = build();
-      store.replace([running("d-1", 60_000)]);
-      const onOpen = vi.fn();
-      chip.onListOpen(onOpen);
-      const btn = chipButton();
-
-      chip.dispose();
-      expect(() => btn.click()).not.toThrow();
-
-      expect(onOpen).not.toHaveBeenCalled();
     });
   });
 });

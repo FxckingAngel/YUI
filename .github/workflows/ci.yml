@@ -22,8 +22,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build # tsc 타입체크 + vite build
-      - run: pnpm typecheck:test # tsc 타입체크 (테스트 파일 포함)
+      - run: pnpm build # tsc typecheck + vite build
+      - run: pnpm typecheck:test # tsc typecheck (test files included)
       - run: pnpm test # vitest run
       - run: pnpm docs:build # vitepress build + dead-link check
 
@@ -103,7 +103,7 @@ jobs:
             rust:
               - 'src-tauri/**'
               - '.github/workflows/ci.yml'
-      # Tauri v2 Linux 빌드 의존성 (공식 prerequisites, Ubuntu 24.04).
+      # Tauri v2 Linux build dependencies (official prerequisites, Ubuntu 24.04).
       - name: Install Tauri system deps
         if: github.event_name != 'pull_request' || steps.chg.outputs.rust == 'true'
         run: |
@@ -156,7 +156,7 @@ jobs:
   mods:
     name: mods (uv + pytest)
     runs-on: ubuntu-latest
-    # Each path is a self-contained uv project; OS calls are mocked, so they run on Linux.
+    # Each tracked pyproject.toml folder is a self-contained uv project; OS calls are mocked, so they run on Linux.
     # One job over all projects (sequential, grouped logs) — a failure doesn't skip the rest.
     steps:
       - uses: actions/checkout@v4
@@ -166,17 +166,25 @@ jobs:
       - name: Sync + test each Python project
         run: |
           rc=0
-          for project in Mods/desktop-control Mods/shell-sandbox Mods/avatar Mods/router integrations/hermes/desire integrations/hermes/platform/yui; do
+          found=0
+          while IFS= read -r -d '' file; do
+            project=$(dirname "$file")
+            found=$((found + 1))
             echo "::group::$project"
             (cd "$project" && uv sync --frozen && uv run pytest) || rc=1
             echo "::endgroup::"
-          done
+          done < <(git ls-files -z -- ':(glob)**/pyproject.toml')
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no tracked pyproject.toml"
+            exit 1
+          fi
           exit $rc
 
   mods-lint:
     name: mods-lint (ruff)
     runs-on: ubuntu-latest
     # Python lint is ruff-only (format + check), enforced over all projects in one job.
+    # Projects are the folders that track a pyproject.toml.
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -185,9 +193,16 @@ jobs:
       - name: Ruff format + check each Python project
         run: |
           rc=0
-          for project in Mods/desktop-control Mods/shell-sandbox Mods/avatar Mods/router integrations/hermes/desire integrations/hermes/platform/yui; do
+          found=0
+          while IFS= read -r -d '' file; do
+            project=$(dirname "$file")
+            found=$((found + 1))
             echo "::group::$project"
             (cd "$project" && uv sync --frozen && uv run ruff format --check . && uv run ruff check .) || rc=1
             echo "::endgroup::"
-          done
+          done < <(git ls-files -z -- ':(glob)**/pyproject.toml')
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no tracked pyproject.toml"
+            exit 1
+          fi
           exit $rc

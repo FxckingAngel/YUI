@@ -16,18 +16,30 @@ const mocks = vi.hoisted(() => ({
   wireWindowSources: vi.fn(),
 }));
 
-vi.mock("../../ambient/locomotion/wire", () => ({
+vi.mock("../../ambient/locomotion/travel/wire-travel-frame", () => ({
   wireTravelFrame: mocks.wireTravelFrame,
+}));
+
+vi.mock("../../ambient/locomotion/walk/wire-walk", () => ({
   wireWalker: mocks.wireWalker,
   wireStrollReflexCancel: mocks.wireStrollReflexCancel,
+}));
+
+vi.mock("../../ambient/locomotion/fall/wire-fall", () => ({
   wireFaller: mocks.wireFaller,
+}));
+
+vi.mock("../../ambient/locomotion/perch/wire-perch", () => ({
   wirePercher: mocks.wirePercher,
+}));
+
+vi.mock("../../ambient/locomotion/climb/wire-climb", () => ({
   wireClimber: mocks.wireClimber,
 }));
 
 vi.mock("../../ambient/locomotion/sitter", () => ({ createSitter: mocks.createSitter }));
 
-vi.mock("../turn/wire-sources", () => ({ wireWindowSources: mocks.wireWindowSources }));
+vi.mock("./wire-window-sources", () => ({ wireWindowSources: mocks.wireWindowSources }));
 
 import {
   createSitLossFall,
@@ -43,7 +55,7 @@ describe("wireLocomotion", () => {
     for (const mock of Object.values(mocks)) mock.mockReset();
   });
 
-  const setup = () => {
+  const setup = (over: { isPanelOpen?: () => boolean } = {}) => {
     const cancelOrder: string[] = [];
     const teardowns: string[] = [];
     const registered: Array<() => void> = [];
@@ -98,8 +110,9 @@ describe("wireLocomotion", () => {
     };
 
     let travelFrameDeps: { setKeepOnScreenPaused(paused: boolean): void } | undefined;
-    let walkerDeps: { onDescend(edge: DescentEdge): void } | undefined;
+    let walkerDeps: { onDescend(edge: DescentEdge): void; isPanelOpen(): boolean } | undefined;
     let fallerDeps: { onWindowLand(target: WindowRect): void } | undefined;
+    let windowSourcesDeps: { onRelocated(): Promise<void> } | undefined;
     mocks.wireTravelFrame.mockImplementation((deps) => {
       travelFrameDeps = deps;
       return travelFrame;
@@ -116,7 +129,10 @@ describe("wireLocomotion", () => {
       fallerDeps = deps;
       return faller;
     });
-    mocks.wireWindowSources.mockImplementation(() => windowSources);
+    mocks.wireWindowSources.mockImplementation((deps) => {
+      windowSourcesDeps = deps;
+      return windowSources;
+    });
     mocks.wirePercher.mockImplementation(() => percher);
     mocks.wireClimber.mockImplementation(() => climber);
 
@@ -143,6 +159,7 @@ describe("wireLocomotion", () => {
       dispatcher: {} as never,
       hitTest: { setMoving: vi.fn() },
       peekActive: () => false,
+      isPanelOpen: over.isPanelOpen ?? (() => false),
       fallSettings: { get: () => ({ enabled: true }) } as never,
       climbSettings: climbSettings as never,
       agentNotifySettings: { get: () => ({ enabled: false, port: 8770 }) } as never,
@@ -159,6 +176,7 @@ describe("wireLocomotion", () => {
       travelFrameDeps: travelFrameDeps!,
       walkerDeps: walkerDeps!,
       fallerDeps: fallerDeps!,
+      windowSourcesDeps: windowSourcesDeps!,
       cancelOrder,
       teardowns,
       registered,
@@ -191,6 +209,15 @@ describe("wireLocomotion", () => {
     expect(s.percher.landOn).toHaveBeenCalledWith(target);
   });
 
+  it("hands the panel-open getter to the walker", () => {
+    let open = true;
+    const s = setup({ isPanelOpen: () => open });
+
+    expect(s.walkerDeps.isPanelOpen()).toBe(true);
+    open = false;
+    expect(s.walkerDeps.isPanelOpen()).toBe(false);
+  });
+
   it("hands a walker descent to the climber", () => {
     const s = setup();
     const edge: DescentEdge = { side: "left", edgeX: 0, topY: 100, bottomY: 400 };
@@ -208,6 +235,14 @@ describe("wireLocomotion", () => {
 
     s.travelFrameDeps.setKeepOnScreenPaused(false);
     expect(s.windowSources.setKeepOnScreenPaused).toHaveBeenLastCalledWith(false);
+  });
+
+  it("answers the relocate callback with a seam-landing faller drop", () => {
+    const s = setup();
+
+    void s.windowSourcesDeps.onRelocated();
+
+    expect(s.faller.drop).toHaveBeenCalledWith({ landOnSeam: true });
   });
 
   it("cancels walker, faller, climber, percher and sitter in that order", () => {

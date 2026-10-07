@@ -17,13 +17,8 @@
  * leave the subscribe/snapshot contract as is and just change the trigger.
  */
 
-import {
-  type AppConfig,
-  type ConfigSection,
-  type LoadConfigOptions,
-  loadConfig,
-  type SecretProvider,
-} from "./load";
+import { type AppConfig, type ConfigSection, type LoadConfigOptions, loadConfig } from "./load";
+import { plainSecretProvider, type SecretProvider } from "./secrets";
 
 /** Default polling interval (ms). Too frequent wastes fetches, too slow delays edit propagation. */
 const DEFAULT_POLL_MS = 1500;
@@ -51,7 +46,7 @@ export interface ConfigStore {
 }
 
 interface ConfigStoreOptions extends LoadConfigOptions {
-  /** Secret lookup for api keys etc. — empty plainSecretProvider when unspecified. */
+  /** Secret lookup for api keys etc. — resolves nothing when unspecified. */
   secrets?: SecretProvider;
 }
 
@@ -66,11 +61,7 @@ function diffSections(a: AppConfig, b: AppConfig): Set<ConfigSection> {
 
 export function createConfigStore(opts: ConfigStoreOptions = {}): ConfigStore {
   const { secrets: secretsOpt, ...loadOpts } = opts;
-  const secrets: SecretProvider = secretsOpt ?? {
-    async get() {
-      return undefined;
-    },
-  };
+  const secrets: SecretProvider = secretsOpt ?? plainSecretProvider();
 
   let current: AppConfig | null = null;
   const listeners = new Set<ConfigListener>();

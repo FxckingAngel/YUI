@@ -1,6 +1,6 @@
 /**
  * Japanese strings.
- * tool.* keys stay English (same as en) — not translated per spec.
+ * tool.* keys stay English (same as en): not translated per spec.
  */
 const ja: Record<string, string> = {
   // tool labels (English — not translated)
@@ -20,7 +20,10 @@ const ja: Record<string, string> = {
   "voice.state.fired": "送信しました",
   "voice.state.error": "エラー",
   "voice.error.not_configured": "設定が必要",
-  "voice.error.not_configured_fix": "バックエンド未設定 — 詳細設定を開く",
+  "voice.error.not_configured_fix": "バックエンド未設定。接続設定を開く",
+  "voice.error.mic_denied": "マイク拒否",
+  "voice.error.no_mic": "マイクなし",
+  "voice.error.mic_unavailable": "マイク使用不可",
 
   // aria labels (parameterized)
   "aria.refresh_speaker": "{name} の参照音声を更新",
@@ -29,23 +32,49 @@ const ja: Record<string, string> = {
   "aria.preview_speaker": "{name} を試聴",
   "aria.voice_input": "音声入力: {label}",
 
-  // surfaces (speech bubble · tool-status · text input)
+  // surfaces (speech bubble · status pill · text input)
+  "aria.back": "戻る",
   "aria.attach_image": "画像を添付",
   "aria.input_field": "YUI に話しかける",
   "aria.send": "送信",
   "aria.stop": "停止",
   "aria.remove_attachment": "添付を削除",
   "aria.dismiss_bubble": "吹き出しを閉じる",
+  "bubble.you": "自分",
+  "bubble.quote_attached": "添付 {count}件",
   "aria.dock_message": "吹き出しをキャラクターに戻す",
   "aria.pop_message": "吹き出しをメッセージウィンドウへ",
   "aria.dismiss_error": "エラーを閉じる",
+
+  // phone top-row openers
+  "phone.open_history": "会話履歴",
+  "phone.open_settings": "設定",
+  "phone.voice.start_aria": "音声入力を開始",
+  "phone.voice.stop_aria": "音声入力を停止",
+  "phone.voice.section": "音声入力",
+  "phone.voice.mode_tap": "タップで切り替え",
+  "phone.voice.mode_always": "聞き続ける",
+  "phone.voice.mode_aria": "音声入力の方式",
+  "phone.voice.note": "聞き続けるはYUIを開いている間だけ動作し、バックグラウンドでは停止します。",
+  "phone.general.stage_section": "ステージ",
+  "phone.general.bubble_section": "吹き出し",
+  "phone.general.stage_aria": "ステージの背景",
+  "phone.general.stage_default": "デフォルト",
+  "phone.general.stage_image": "画像",
+  "phone.general.image_label": "背景画像",
+  "phone.general.image_sub": "文字が読めるよう暗く重ねます。",
+  "phone.general.image_choose": "選ぶ",
+  "phone.general.import_error":
+    "この画像は使えません。PNG、JPEG、WebP のファイルを選んでください。",
+
   "input.placeholder": "話しかけてみて…",
   "input.error_auth": "認証失敗 · APIキー確認",
   "input.error_network": "応答なし · 接続確認",
+  "input.error_http": "{status} {message}",
   "input.error_stall": "バックエンドが応答しなくなりました",
   "input.error_parse": "応答処理に失敗",
   "input.error_not_configured": "バックエンド未設定",
-  "input.error_open_advanced": "詳細を開く",
+  "input.error_open_connection": "接続を開く",
   "input.attach_too_many": "画像が多すぎ · 1ターン{max}枚まで",
   "input.attach_too_large": "画像が大きすぎ · 1枚{max}MBまで",
   "input.attach_not_ready": "まだ添付できない · 上限を読み込み中",
@@ -53,22 +82,24 @@ const ja: Record<string, string> = {
   // message window name plate
   "plate.thinking": "考え中",
   "plate.responding": "応答中",
+  "plate.reconnecting": "再接続中",
+  "plate.key_rejected": "キー拒否",
 
   // chain-break (404) recovery notice
   "chain.reset_notice": "会話コンテキストがリセットされました",
   "hotkey.register_failed":
-    "呼び出しショートカット {accelerator} を登録できませんでした — 他のアプリが使用中かもしれません",
+    "呼び出しショートカット {accelerator} を登録できませんでした。他のアプリが使用中かもしれません",
   "ingress.dead_notice":
-    "エージェントイベントの受信を開始できませんでした（ポート {port} 使用中）— このセッションでは通知が無効です",
+    "エージェントイベントの受信を開始できませんでした（ポート {port} 使用中）。このセッションでは通知が無効です",
 
   // boot-failure notice
   "boot.error_title": "YUI を起動できませんでした",
-  "boot.error_config": "設定を読み込めませんでした — {file}",
+  "boot.error_config": "設定を読み込めませんでした：{file}",
   "boot.error_vrm":
-    "VRM モデルが見つかりません — resources/vrms/ に .vrm ファイルを置いて再起動してください。",
+    "VRM モデルが見つかりません。resources/vrms/ に .vrm ファイルを置いて再起動してください。",
   "boot.error_dismiss": "閉じる",
 
-  // capture indicator
+  // status pill (capture)
   "capture.watching": "画面を見ています",
 
   // cue-list internal labels
@@ -97,9 +128,15 @@ const ja: Record<string, string> = {
   "panel.pop_out": "ウィンドウに切り出す",
   "panel.message": "メッセージを入力",
   "panel.close": "閉じる",
-  "panel.rail_collapse": "セクション一覧を折りたたむ",
-  "panel.rail_expand": "セクション一覧を広げる",
   "settings.title": "YUI 設定",
+  "help.section": "ヘルプ",
+  "help.controls.label": "操作方法",
+  "help.controls.sub": "ショートカットとマウス操作をユイが直接説明します。",
+  "help.controls.request": "YUIの操作方法を教えて",
+  "help.capabilities.label": "できること",
+  "help.capabilities.sub": "このアプリでユイと一緒にできることを紹介します。",
+  "help.capabilities.request": "YUIで何ができるか教えて",
+  "help.ask": "聞いてみる",
   "devtools.label": "開発者ツール",
   "devtools.sub": "送信コンテキストとモーションを確認",
   "devtools.open": "開く",
@@ -119,13 +156,14 @@ const ja: Record<string, string> = {
   "devtools.advanced.context_window_default": "デフォルト",
 
   // tabs
+  "tabs.conn": "接続",
   "tabs.talk": "会話",
   "tabs.char": "キャラクター",
   "tabs.input": "入力",
-  "tabs.adv": "詳細",
   "tabs.react": "話しかけ",
   "tabs.react_hint": "ユイの方から話しかけるときのルール",
   "tabs.hist": "履歴",
+  "tabs.general": "一般",
 
   // reasoning effort segment
   "reasoning.label": "推論の強さ",
@@ -195,7 +233,6 @@ const ja: Record<string, string> = {
   "vrm.swap_error": "このモデルを読み込めませんでした。前のモデルに戻しました。",
 
   // speaker section
-  "speaker.section": "音声",
   "speaker.group_aria": "話者",
   "speaker.add": "ファイルから追加…",
   "speaker.import_error":
@@ -211,6 +248,11 @@ const ja: Record<string, string> = {
   "speaker.rename_hint_save": "保存",
   "speaker.rename_hint_cancel": "キャンセル",
   "speaker.import_overwrite_warn": "同じ名前の既存の音声を上書きします",
+  "speaker.import_taken_warn": "別のプロバイダーの音声がこの名前を使っています",
+  "speaker.manual_aria": "ボイスIDを貼り付け",
+  "speaker.manual_placeholder": "ボイスIDを貼り付け…",
+  "speaker.manual_invalid": "使えないボイスIDです",
+  "speaker.manual_taken": "別のプロバイダーの音声がこのIDを使っています",
   "speaker.loading": "読み込み中…",
   "speaker.swapping": "切り替え中…",
   "speaker.refreshing": "更新中…",
@@ -270,10 +312,13 @@ const ja: Record<string, string> = {
   "viewpoint.section": "視点",
   "viewpoint.sub": "Shift + ドラッグで回転、スクロールでズーム",
   "viewpoint.reset": "正面に戻す",
+  "viewpoint.view_section": "表示",
+  "viewpoint.reset_view_label": "視点をリセット",
+  "viewpoint.reset_view_sub": "回転とズームを初期状態に戻します。",
+  "viewpoint.reset_view_button": "リセット",
 
   // screenshot / input tab
   "screenshot.label": "スクリーンショットを添付",
-  "screenshot.sub": "会話しながら画面を一緒に見ます",
   "screenshot.source_label": "送る画面",
   "screenshot.source_aria": "送る画面",
   "screenshot.monitor_primary": "メイン画面",
@@ -286,7 +331,6 @@ const ja: Record<string, string> = {
   // voice input
   "voice_input.label": "音声入力",
   "voice_input.sub": "話し終わると STT を実行し、ユーザー入力として送ります",
-  "voice_input.aria": "音声入力",
   "voice_input.silence_label": "無音のしきい値",
   "voice_input.silence_sub": "話し終わってからこの時間だけ待ってから送信します",
   "voice_input.silence_aria": "無音のしきい値",
@@ -316,24 +360,23 @@ const ja: Record<string, string> = {
   // cue lists (input tab)
   "cue.schedule_title": "時間帯のあいさつ",
   "cue.schedule_sub": "決めた時刻に席にいると、先に話しかけます",
-  "cue.schedule_add": "+ あいさつを追加",
+  "cue.schedule_add": "あいさつを追加",
   "cue.proactive_title": "ループリアクション",
   "cue.proactive_sub": "作業中にしばらく静かにしていると、定期的に先に話しかけます",
-  "cue.proactive_add": "+ リアクションを追加",
+  "cue.proactive_add": "リアクションを追加",
 
   // endpoints
-  "endpoints.section": "エンドポイント",
-  "endpoints.summary_hint": "詳細 — サーバーアドレス・モデル",
   "endpoints.field_sub": "空欄にするとデフォルトを使います",
-  "endpoints.reset": "デフォルトに戻す",
   "endpoints.url_error": "正しい URL ではありません (http:// または https://)",
   "endpoints.chat_base_url.label": "チャットサーバー URL",
   "endpoints.stt_base_url.label": "音声認識 (STT) サーバー URL",
+  "endpoints.stt_model.label": "STTモデル",
   "endpoints.tts_base_url.label": "音声合成 (TTS) サーバー URL",
+  "endpoints.tts_model.label": "TTSモデル",
   "endpoints.broker_base_url.label": "表現ブローカー URL",
   "endpoints.chat_model.label": "チャットモデル",
 
-  // per-service sections (advanced tab)
+  // per-service sections (connection tab)
   "svc.type_label": "種類",
   "svc.chat": "チャット",
   "svc.chat_aria": "チャット API の種類",
@@ -355,7 +398,8 @@ const ja: Record<string, string> = {
   "svc.stt_type": "OpenAI 互換",
   "svc.tts": "TTS",
   "svc.tts_hint": "OpenAI 互換",
-  "svc.tts_type": "OpenAI 互換",
+  "svc.tts_type": "プロバイダー",
+  "svc.tts_preset_aria": "TTSプロバイダーのプリセット",
   "svc.broker": "Broker",
   "svc.broker_hint": "MCP streamable-http",
   "svc.broker_type": "MCP streamable-http",
@@ -365,32 +409,30 @@ const ja: Record<string, string> = {
   "svc.reset_broker": "Broker を戻す",
 
   // chat API key
-  "chatkey.section": "チャット API キー",
   "chatkey.label": "チャット API キー",
-  "chatkey.sub_default": "デフォルトを使用中 — 空欄にするとビルド時のキーを使います",
-  "chatkey.sub_override": "この端末に保存済み — 空欄にすると元のキーに戻ります",
+  "chatkey.sub_default": "デフォルトを使用中：空欄にするとビルド時のキーを使います",
+  "chatkey.sub_override": "この端末に保存済み。空欄にすると元のキーに戻ります",
   "chatkey.show": "キーを表示",
   "chatkey.hide": "キーを隠す",
   "chatkey.clear": "キーを消去",
 
   // STT API key
   "sttkey.label": "STT API キー",
-  "sttkey.sub_default": "デフォルトを使用中 — 空欄にするとビルド時のキーを使います",
-  "sttkey.sub_override": "この端末に保存済み — 空欄にすると元のキーに戻ります",
+  "sttkey.sub_default": "デフォルトを使用中：空欄にするとビルド時のキーを使います",
+  "sttkey.sub_override": "この端末に保存済み。空欄にすると元のキーに戻ります",
   "sttkey.show": "キーを表示",
   "sttkey.hide": "キーを隠す",
   "sttkey.clear": "キーを消去",
 
   // TTS API key
   "ttskey.label": "TTS API キー",
-  "ttskey.sub_default": "デフォルトを使用中 — 空欄にするとビルド時のキーを使います",
-  "ttskey.sub_override": "この端末に保存済み — 空欄にすると元のキーに戻ります",
+  "ttskey.sub_default": "デフォルトを使用中：空欄にするとビルド時のキーを使います",
+  "ttskey.sub_override": "この端末に保存済み。空欄にすると元のキーに戻ります",
   "ttskey.show": "キーを表示",
   "ttskey.hide": "キーを隠す",
   "ttskey.clear": "キーを消去",
 
   // performance
-  "perf.section": "パフォーマンス",
   "perf.idle_label": "待機中の省電力 (30fps)",
   "perf.idle_sub":
     "キャラクターが静止しているときにフレームレートを下げて電力を節約します。話したり動いたりすると自動でなめらかに戻ります。",
@@ -413,7 +455,7 @@ const ja: Record<string, string> = {
   "hint.first_run": "右クリックでコントロール · {hotkey}で話しかけてね",
   "hint.first_run_no_hotkey": "右クリックでコントロール",
   "hint.setup_backend":
-    "考えるためのバックエンドがまだないの · 右クリックして詳細タブを開いて、OpenAI 互換サーバーを指定してね",
+    "考えるためのバックエンドがまだないの · 右クリックして接続タブを開いて、OpenAI 互換サーバーを指定してね",
 
   // reactions tab
   "reactions.watchers_title": "ウォッチャー",
@@ -498,11 +540,12 @@ const ja: Record<string, string> = {
   "deleg.done_ago": "完了 · {time}前",
   "deleg.failed": "失敗",
   "deleg.failed_ago": "失敗 · {time}前",
+  "deleg.unknown": "結果未確認",
+  "deleg.unknown_ago": "結果未確認 · {time}前",
   "deleg.took": "所要 {time}",
 
   // reasoning
   "think.chip": "思考",
-  "aria.think_toggle": "思考の表示・非表示",
 };
 
 export default ja;

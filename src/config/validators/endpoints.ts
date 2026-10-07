@@ -1,7 +1,8 @@
-import type { EndpointsConfig } from "../../contract";
+import type { EndpointsConfig, TtsProviderName } from "../../contract";
+import { TTS_PROVIDERS } from "../tts-provider";
 import { assertValid, ConfigError, isObject } from "./shared";
 
-/** 미설정 판정 — 키가 없거나 빈 문자열이면 그 기능은 꺼진 것으로 본다. */
+/** A missing or empty key means the feature is off. */
 function unset(v: unknown): boolean {
   return v === undefined || v === "";
 }
@@ -13,11 +14,16 @@ export function validateEndpoints(file: string, raw: unknown): EndpointsConfig {
   }
   const httpUrl = (k: string): string => {
     const v = raw[k];
-    if (typeof v !== "string" || !/^https?:\/\//.test(v)) {
-      issues.push(`${k} must be an http(s) URL (got: ${JSON.stringify(v)})`);
-      return "";
+    if (typeof v === "string" && /^https?:\/\//.test(v)) {
+      try {
+        new URL(v);
+        return v;
+      } catch {
+        // 파서가 못 읽는 URL은 요청 시점에 터지므로 설정 시점에 거른다.
+      }
     }
-    return v;
+    issues.push(`${k} must be an http(s) URL (got: ${JSON.stringify(v)})`);
+    return "";
   };
   // 서비스 URL은 선택 — 미설정이면 해당 기능 off. 값이 있으면 http(s)여야 함.
   const optHttpUrl = (k: string): string => (unset(raw[k]) ? "" : httpUrl(k));
@@ -44,8 +50,18 @@ export function validateEndpoints(file: string, raw: unknown): EndpointsConfig {
     );
   }
   const chat_api: EndpointsConfig["chat_api"] = isChatApi(rawChatApi) ? rawChatApi : undefined;
-  // tts_model / tts_speaker: optional. TTS service default when unset.
-  const optStr = (k: "tts_model" | "tts_speaker"): string | undefined => {
+  // tts_provider: optional enum, irodori when unset (resolved by ttsProviderOf).
+  const rawTtsProvider = raw.tts_provider;
+  const isTtsProvider = (v: unknown): v is TtsProviderName =>
+    (TTS_PROVIDERS as readonly unknown[]).includes(v);
+  if (rawTtsProvider !== undefined && !isTtsProvider(rawTtsProvider)) {
+    issues.push(
+      `tts_provider must be one of ${TTS_PROVIDERS.map((p) => `"${p}"`).join(" | ")} (got: ${JSON.stringify(rawTtsProvider)})`,
+    );
+  }
+  const tts_provider = isTtsProvider(rawTtsProvider) ? rawTtsProvider : undefined;
+  // stt_model / tts_model / tts_speaker: optional. The service default applies when unset.
+  const optStr = (k: "stt_model" | "tts_model" | "tts_speaker"): string | undefined => {
     const v = raw[k];
     if (v !== undefined && (typeof v !== "string" || v.trim() === "")) {
       issues.push(`${k} must be a non-blank string (got: ${JSON.stringify(v)})`);
@@ -55,6 +71,7 @@ export function validateEndpoints(file: string, raw: unknown): EndpointsConfig {
   };
   const tts_model = optStr("tts_model");
   const tts_speaker = optStr("tts_speaker");
+  const stt_model = optStr("stt_model");
   // broker_base_url: optional. If set, must be an http(s) URL (Expression Broker MCP endpoint).
   let broker_base_url: string | undefined;
   if (!unset(raw.broker_base_url)) {
@@ -94,7 +111,9 @@ export function validateEndpoints(file: string, raw: unknown): EndpointsConfig {
     ...(typeof chat_model === "string" ? { chat_model } : {}),
     ...(chat_api !== undefined ? { chat_api } : {}),
     stt_base_url,
+    ...(stt_model !== undefined ? { stt_model } : {}),
     tts_base_url,
+    ...(tts_provider !== undefined ? { tts_provider } : {}),
     ...(tts_model !== undefined ? { tts_model } : {}),
     ...(tts_speaker !== undefined ? { tts_speaker } : {}),
     ...(typeof tts_max_inflight === "number" ? { tts_max_inflight } : {}),

@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { ControlEnvelope, ExpressArgs, ToolStatus, Usage } from "../../contract";
-import { createReasoningStore } from "../../io/bridge/reasoning-store";
+import { createReasoningStore } from "../../io/bridge/reasoning/reasoning-store";
 import type { Logger } from "../../logger";
 import {
   CONFIG,
@@ -37,7 +37,7 @@ let applyDirective: ReturnType<typeof vi.fn>;
 let turnOutput: ReturnType<typeof makeTurnOutput>;
 let toolStatusSink: Mock<(status: ToolStatus) => void>;
 let usageSink: Mock<(usage: Usage) => void>;
-let spokeTextSink: Mock<(spoke: boolean) => void>;
+let spokeTextSink: Mock<(turnId: number, spoke: boolean) => void>;
 let reasoning: Record<"append" | "finish" | "interrupt", Mock>;
 let caller: BackendCaller;
 let logger: Logger;
@@ -94,19 +94,19 @@ describe("backend_caller — B4 speech gate (speech_text only)", () => {
   it("reports spoke text true for non-empty speech_text on the completed-only path", async () => {
     script.events = [completedEvent({ speech_text: "응 듣고 있어" })];
     await caller.call(turnOf(userEnv()));
-    expect(spokeTextSink).toHaveBeenCalledWith(true);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, true);
   });
 
   it("reports spoke text true for a streamed reply", async () => {
     script.events = [deltaEvent("안녕"), completedEvent({ speech_text: "안녕" })];
     await caller.call(turnOf(userEnv()));
-    expect(spokeTextSink).toHaveBeenCalledWith(true);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, true);
   });
 
   it("reports spoke text false for empty speech_text", async () => {
     script.events = [completedEvent({ speech_text: "" })];
     await caller.call(turnOf(userEnv()));
-    expect(spokeTextSink).toHaveBeenCalledWith(false);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, false);
   });
 });
 
@@ -119,7 +119,7 @@ describe("backend_caller — [SILENT] token silence", () => {
     expect(turnOutput.delta).not.toHaveBeenCalled();
     expect(turnOutput.speak).not.toHaveBeenCalled();
     expect(turnOutput.end).not.toHaveBeenCalled();
-    expect(spokeTextSink).toHaveBeenCalledWith(false);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, false);
     // silent turn still renders emotion/motion on the completed path (firing≠judgment).
     expect(applyDirective).toHaveBeenCalledWith(env);
   });
@@ -129,7 +129,7 @@ describe("backend_caller — [SILENT] token silence", () => {
     const res = await caller.call(turnOf(userEnv()));
     expect(res).toBe("ok");
     expect(turnOutput.speak).not.toHaveBeenCalled();
-    expect(spokeTextSink).toHaveBeenCalledWith(false);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, false);
   });
 
   it("token turning into a reply streams the held text as one delta, spokeText true", async () => {
@@ -140,7 +140,7 @@ describe("backend_caller — [SILENT] token silence", () => {
     ];
     await caller.call(turnOf(userEnv()));
     expect(turnOutput.delta.mock.calls.map((c) => c[0])).toEqual(["[SILENT] is what I would say"]);
-    expect(spokeTextSink).toHaveBeenCalledWith(true);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, true);
   });
 
   it("whitespace-only streamed reply → no delta, no speak, no end, spokeText false", async () => {
@@ -150,7 +150,7 @@ describe("backend_caller — [SILENT] token silence", () => {
     expect(turnOutput.delta).not.toHaveBeenCalled();
     expect(turnOutput.speak).not.toHaveBeenCalled();
     expect(turnOutput.end).not.toHaveBeenCalled();
-    expect(spokeTextSink).toHaveBeenCalledWith(false);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, false);
   });
 
   it("streamed [SILENT] with an express cue → completed-path applyDirective, no delta, no end", async () => {
@@ -172,7 +172,7 @@ describe("backend_caller — [SILENT] token silence", () => {
     await caller.call(turnOf(userEnv()));
     expect(turnOutput.delta.mock.calls.map((c) => c[0])).toEqual(["[SIL"]);
     expect(turnOutput.end).toHaveBeenCalledTimes(1);
-    expect(spokeTextSink).toHaveBeenCalledWith(true);
+    expect(spokeTextSink).toHaveBeenCalledWith(1, true);
   });
 });
 
@@ -376,6 +376,29 @@ describe("backend_caller — streaming speech deltas (incremental TTS)", () => {
   });
 });
 
+// ── server error detail (onErrorDetail) ──────────────────────────────────────
+
+describe("backend_caller — server error detail (onErrorDetail)", () => {
+  it("stream error with status 400 → resolves network_drop and hands {status, message} to onErrorDetail", async () => {
+    const onErrorDetail = vi.fn();
+    script.events = [{ type: "error", message: "model does not support tools", status: 400 }];
+    const res = await caller.call(turnOf(userEnv()), undefined, onErrorDetail);
+    expect(res).toBe("network_drop");
+    expect(onErrorDetail).toHaveBeenCalledWith({
+      status: 400,
+      message: "model does not support tools",
+    });
+  });
+
+  it("no-status stream error → network_drop, onErrorDetail never fires", async () => {
+    const onErrorDetail = vi.fn();
+    script.events = [{ type: "error", message: "boom" }];
+    const res = await caller.call(turnOf(userEnv()), undefined, onErrorDetail);
+    expect(res).toBe("network_drop");
+    expect(onErrorDetail).not.toHaveBeenCalled();
+  });
+});
+
 // ── per-beat cue ownership: streaming pipeline applies cues audio-timed ─────────
 
 describe("backend_caller — per-beat cue application (pipeline ownership)", () => {
@@ -523,7 +546,7 @@ describe("backend_caller — usage sink (token accounting channel)", () => {
   });
 });
 
-// ── reasoning chip feed (streaming path) ────────────────────────────────────────
+// ── reasoning feed (streaming path) ─────────────────────────────────────────────
 
 describe("backend_caller — reasoning store feed", () => {
   it("each reasoning event → store.append in order; completed → finish(undefined)", async () => {
@@ -738,18 +761,6 @@ describe("backend_caller — TTFT thinking lifecycle", () => {
     await caller.call(turnOf(userEnv()));
     // express routed WITHOUT ending thinking; end fires at the delta (before turnOutput.delta).
     expect(order).toEqual(["cue", "end", "delta"]);
-  });
-
-  it("thinking PERSISTS through tool_status-only completed with no speech (ends via finally)", async () => {
-    // tool_status rides the completed envelope; no speech_delta ever arrives → silent turn.
-    turnOutput.thinkingStart.mockClear();
-    caller = makeCaller(true);
-    const status = { state: "running" as const, tool_id: "web_search" };
-    script.events = [completedEvent({ speech_text: "", tool_status: status })];
-    await caller.call(turnOf(userEnv()));
-    // no delta → endThinking only fired once, via finally.
-    expect(turnOutput.thinkingStart).toHaveBeenCalledTimes(1);
-    expect(turnOutput.thinkingEnd).toHaveBeenCalledTimes(1);
   });
 
   it("silent turn (completed, empty speech, no deltas) → thinkingEnd once via finally", async () => {

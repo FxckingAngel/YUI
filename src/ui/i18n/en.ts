@@ -1,5 +1,5 @@
 /**
- * English strings — source of truth for the key set.
+ * English strings: source of truth for the key set.
  * All tool.* keys stay English in every locale (not translated).
  */
 const en: Record<string, string> = {
@@ -21,7 +21,10 @@ const en: Record<string, string> = {
   "voice.state.error": "Error",
   // the one voice failure the settings panel resolves — the chip becomes the fix
   "voice.error.not_configured": "Setup needed",
-  "voice.error.not_configured_fix": "backend not configured — open Advanced settings",
+  "voice.error.not_configured_fix": "backend not configured. Open Connection settings",
+  "voice.error.mic_denied": "Mic blocked",
+  "voice.error.no_mic": "No mic",
+  "voice.error.mic_unavailable": "Mic unavailable",
 
   // aria labels (parameterized)
   "aria.refresh_speaker": "Refresh {name} reference voice",
@@ -30,23 +33,48 @@ const en: Record<string, string> = {
   "aria.preview_speaker": "Preview {name}",
   "aria.voice_input": "Voice input: {label}",
 
-  // surfaces (speech bubble · tool-status · text input)
+  // surfaces (speech bubble · status pill · text input)
+  "aria.back": "Back",
   "aria.attach_image": "Attach image",
   "aria.input_field": "Talk to YUI",
   "aria.send": "Send",
   "aria.stop": "Stop",
   "aria.remove_attachment": "Remove attachment",
   "aria.dismiss_bubble": "Dismiss speech bubble",
+  "bubble.you": "You",
+  "bubble.quote_attached": "{count} attached",
   "aria.dock_message": "Move speech back to the character",
   "aria.pop_message": "Move speech to the message window",
   "aria.dismiss_error": "Dismiss error",
+
+  // phone top-row openers
+  "phone.open_history": "Conversation history",
+  "phone.open_settings": "Settings",
+  "phone.voice.start_aria": "Start voice input",
+  "phone.voice.stop_aria": "Stop voice input",
+  "phone.voice.section": "Voice input",
+  "phone.voice.mode_tap": "Tap to toggle",
+  "phone.voice.mode_always": "Keep listening",
+  "phone.voice.mode_aria": "Voice input mode",
+  "phone.voice.note": "Keep listening runs while YUI is open and stops in the background.",
+  "phone.general.stage_section": "Stage",
+  "phone.general.bubble_section": "Speech bubble",
+  "phone.general.stage_aria": "Stage background",
+  "phone.general.stage_default": "Default",
+  "phone.general.stage_image": "Image",
+  "phone.general.image_label": "Background image",
+  "phone.general.image_sub": "Dimmed so text stays readable.",
+  "phone.general.image_choose": "Choose",
+  "phone.general.import_error": "Could not use this image. Pick a PNG, JPEG or WebP file.",
+
   "input.placeholder": "Say something…",
   "input.error_auth": "Auth failed · check API key",
   "input.error_network": "No response · check connection",
+  "input.error_http": "{status} {message}",
   "input.error_stall": "Backend stopped responding",
   "input.error_parse": "Response parse failed",
   "input.error_not_configured": "Backend not configured",
-  "input.error_open_advanced": "Open Advanced",
+  "input.error_open_connection": "Open Connection",
   "input.attach_too_many": "Too many images · up to {max} per turn",
   "input.attach_too_large": "Image too large · up to {max}MB each",
   "input.attach_not_ready": "Can't attach yet · loading limits",
@@ -54,21 +82,23 @@ const en: Record<string, string> = {
   // message window name plate
   "plate.thinking": "Thinking",
   "plate.responding": "Responding",
+  "plate.reconnecting": "Reconnecting",
+  "plate.key_rejected": "Key rejected",
 
   // chain-break (404) recovery notice
   "chain.reset_notice": "Conversation context was reset",
   "hotkey.register_failed":
-    "Summon hotkey {accelerator} could not be registered — another app may hold it",
+    "Summon hotkey {accelerator} could not be registered: another app may hold it",
   "ingress.dead_notice":
-    "Agent event listener failed to start (port {port} in use) — agent notifications are off this session",
+    "Agent event listener failed to start (port {port} in use), so agent notifications are off this session",
 
   // boot-failure notice
   "boot.error_title": "YUI failed to start",
-  "boot.error_config": "Could not load settings — {file}",
-  "boot.error_vrm": "No VRM model found — put a .vrm file in resources/vrms/ and restart.",
+  "boot.error_config": "Could not load settings: {file}",
+  "boot.error_vrm": "No VRM model found. Put a .vrm file in resources/vrms/ and restart.",
   "boot.error_dismiss": "Dismiss",
 
-  // capture indicator
+  // status pill (capture)
   "capture.watching": "Watching your screen",
 
   // cue-list internal labels
@@ -97,9 +127,15 @@ const en: Record<string, string> = {
   "panel.pop_out": "Pop out to window",
   "panel.message": "Type a message",
   "panel.close": "Close",
-  "panel.rail_collapse": "Collapse sections rail",
-  "panel.rail_expand": "Expand sections rail",
   "settings.title": "YUI Settings",
+  "help.section": "Help",
+  "help.controls.label": "Controls",
+  "help.controls.sub": "She walks you through the shortcuts and mouse controls.",
+  "help.controls.request": "How do I control YUI?",
+  "help.capabilities.label": "What she can do",
+  "help.capabilities.sub": "She introduces what you can do together through this app.",
+  "help.capabilities.request": "What can you do for me through YUI?",
+  "help.ask": "Ask",
   "devtools.label": "Developer Tools",
   "devtools.sub": "Inspect sent context and preview motions",
   "devtools.open": "Open",
@@ -118,13 +154,14 @@ const en: Record<string, string> = {
   "devtools.advanced.context_window_default": "Default",
 
   // tabs
+  "tabs.conn": "Connection",
   "tabs.talk": "Talk",
   "tabs.char": "Character",
   "tabs.input": "Input",
-  "tabs.adv": "Advanced",
   "tabs.react": "Proactive",
   "tabs.react_hint": "Rules for when YUI speaks up first",
   "tabs.hist": "History",
+  "tabs.general": "General",
 
   // reasoning effort segment
   "reasoning.label": "Reasoning effort",
@@ -194,7 +231,6 @@ const en: Record<string, string> = {
   "vrm.swap_error": "Could not load this model. Reverted to the previous one.",
 
   // speaker section
-  "speaker.section": "Voice",
   "speaker.group_aria": "Speaker",
   "speaker.add": "Add from file…",
   "speaker.import_error": "Could not upload this voice. Check the audio file and the TTS server.",
@@ -209,6 +245,11 @@ const en: Record<string, string> = {
   "speaker.rename_hint_save": "save",
   "speaker.rename_hint_cancel": "cancel",
   "speaker.import_overwrite_warn": "replaces the existing voice of this name",
+  "speaker.import_taken_warn": "another provider's voice uses this name",
+  "speaker.manual_aria": "Paste a voice id",
+  "speaker.manual_placeholder": "Paste a voice id…",
+  "speaker.manual_invalid": "Not a usable voice id",
+  "speaker.manual_taken": "Another provider's voice already uses this id",
   "speaker.loading": "Loading…",
   "speaker.swapping": "Switching…",
   "speaker.refreshing": "Refreshing…",
@@ -239,7 +280,7 @@ const en: Record<string, string> = {
   // express motion (agent-selectable motion vocabulary)
   "express_motion.section": "Expression motion",
   "express_motion.sub":
-    "Motions she may pick while talking — turning one off drops it from her vocabulary",
+    "Motions she may pick while talking. Turning one off drops it from her vocabulary",
   "express_motion.group_aria": "Expression motion selection",
   "express_motion.count": "{on}/{total} on",
   "express_motion.master_aria": "All of {group}",
@@ -269,10 +310,13 @@ const en: Record<string, string> = {
   "viewpoint.section": "Viewpoint",
   "viewpoint.sub": "Shift + drag to orbit, scroll to zoom",
   "viewpoint.reset": "Reset to front",
+  "viewpoint.view_section": "View",
+  "viewpoint.reset_view_label": "Reset view",
+  "viewpoint.reset_view_sub": "Restores rotation and zoom.",
+  "viewpoint.reset_view_button": "Reset",
 
   // screenshot / input tab
   "screenshot.label": "Attach screenshot",
-  "screenshot.sub": "See your screen together while talking",
   "screenshot.source_label": "Screen to send",
   "screenshot.source_aria": "Screen to send",
   "screenshot.monitor_primary": "Primary",
@@ -285,7 +329,6 @@ const en: Record<string, string> = {
   // voice input
   "voice_input.label": "Voice input",
   "voice_input.sub": "When you stop speaking, STT runs and sends it as user input",
-  "voice_input.aria": "Voice input",
   "voice_input.silence_label": "Silence threshold",
   "voice_input.silence_sub": "Waits this long after speech ends before sending",
   "voice_input.silence_aria": "Silence threshold",
@@ -315,24 +358,23 @@ const en: Record<string, string> = {
   // cue lists (input tab)
   "cue.schedule_title": "Scheduled greeting",
   "cue.schedule_sub": "Greets you first if you're at your desk at the set time",
-  "cue.schedule_add": "+ Add greeting",
+  "cue.schedule_add": "Add greeting",
   "cue.proactive_title": "Loop reaction",
   "cue.proactive_sub": "Checks in on a repeating schedule if you've been quiet at work",
-  "cue.proactive_add": "+ Add reaction",
+  "cue.proactive_add": "Add reaction",
 
   // endpoints
-  "endpoints.section": "Endpoints",
-  "endpoints.summary_hint": "Advanced — server addresses · model",
   "endpoints.field_sub": "Leave empty to use the default",
-  "endpoints.reset": "Reset to default",
   "endpoints.url_error": "Not a valid URL (http:// or https://)",
   "endpoints.chat_base_url.label": "Chat server URL",
   "endpoints.stt_base_url.label": "Speech recognition (STT) server URL",
+  "endpoints.stt_model.label": "STT model",
   "endpoints.tts_base_url.label": "Speech synthesis (TTS) server URL",
+  "endpoints.tts_model.label": "TTS model",
   "endpoints.broker_base_url.label": "Expression broker URL",
   "endpoints.chat_model.label": "Chat model",
 
-  // per-service sections (advanced tab)
+  // per-service sections (connection tab)
   "svc.type_label": "Type",
   "svc.chat": "Chat",
   "svc.chat_aria": "Chat API type",
@@ -354,7 +396,8 @@ const en: Record<string, string> = {
   "svc.stt_type": "OpenAI-compatible",
   "svc.tts": "TTS",
   "svc.tts_hint": "OpenAI-compatible",
-  "svc.tts_type": "OpenAI-compatible",
+  "svc.tts_type": "Provider",
+  "svc.tts_preset_aria": "TTS provider preset",
   "svc.broker": "Broker",
   "svc.broker_hint": "MCP streamable-http",
   "svc.broker_type": "MCP streamable-http",
@@ -364,32 +407,30 @@ const en: Record<string, string> = {
   "svc.reset_broker": "Reset Broker",
 
   // chat API key
-  "chatkey.section": "Chat API key",
   "chatkey.label": "Chat API key",
-  "chatkey.sub_default": "Using the default — leave empty to use the build-time key",
-  "chatkey.sub_override": "Saved on this device — clear to return to the original key",
+  "chatkey.sub_default": "Using the default: leave empty to use the build-time key",
+  "chatkey.sub_override": "Saved on this device. Clear to return to the original key",
   "chatkey.show": "Show key",
   "chatkey.hide": "Hide key",
   "chatkey.clear": "Clear key",
 
   // STT API key
   "sttkey.label": "STT API key",
-  "sttkey.sub_default": "Using the default — leave empty to use the build-time key",
-  "sttkey.sub_override": "Saved on this device — clear to return to the original key",
+  "sttkey.sub_default": "Using the default: leave empty to use the build-time key",
+  "sttkey.sub_override": "Saved on this device. Clear to return to the original key",
   "sttkey.show": "Show key",
   "sttkey.hide": "Hide key",
   "sttkey.clear": "Clear key",
 
   // TTS API key
   "ttskey.label": "TTS API key",
-  "ttskey.sub_default": "Using the default — leave empty to use the build-time key",
-  "ttskey.sub_override": "Saved on this device — clear to return to the original key",
+  "ttskey.sub_default": "Using the default: leave empty to use the build-time key",
+  "ttskey.sub_override": "Saved on this device. Clear to return to the original key",
   "ttskey.show": "Show key",
   "ttskey.hide": "Hide key",
   "ttskey.clear": "Clear key",
 
   // performance
-  "perf.section": "Performance",
   "perf.idle_label": "Power saving when idle (30fps)",
   "perf.idle_sub":
     "Lowers the frame rate while the character is still to save power. It smooths out automatically when speaking or moving.",
@@ -412,7 +453,7 @@ const en: Record<string, string> = {
   "hint.first_run": "Right-click me for controls · press {hotkey} to talk",
   "hint.first_run_no_hotkey": "Right-click me for controls",
   "hint.setup_backend":
-    "I have no backend to think with yet — right-click me, open Advanced, and point me at an OpenAI-compatible server",
+    "I have no backend to think with yet. Right-click me, open Connection, and point me at an OpenAI-compatible server",
 
   // reactions tab
   "reactions.watchers_title": "Watchers",
@@ -499,11 +540,12 @@ const en: Record<string, string> = {
   "deleg.done_ago": "Done · {time} ago",
   "deleg.failed": "Failed",
   "deleg.failed_ago": "Failed · {time} ago",
+  "deleg.unknown": "Outcome unverified",
+  "deleg.unknown_ago": "Outcome unverified · {time} ago",
   "deleg.took": "Took {time}",
 
   // reasoning
   "think.chip": "Reasoning",
-  "aria.think_toggle": "Show or hide the reasoning",
 };
 
 export default en;

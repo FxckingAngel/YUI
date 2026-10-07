@@ -49,73 +49,83 @@ present.*
 
 ## Quickstart
 
-No dev tools needed — download, open, connect:
+Paste this into any coding agent (Claude Code, Codex, OpenCode, Cursor):
 
-1. **Download** — grab the [latest release](https://github.com/yw0nam/YUI/releases/latest):
- the macOS (Apple Silicon) `.dmg`, or the experimental Windows x64 installer.
-2. **Open** — builds are unsigned, so macOS blocks the first launch: right-click
- the app → **Open**, and if it still refuses, allow it under **System
- Settings → Privacy &amp; Security → Open Anyway**.
-3. **Connect** — the character appears with no backend attached and tells you
- where to go: right-click her, open **Advanced**, and point YUI at any
- OpenAI-compatible endpoint (base URL, model, API key). Then start talking.
+```text
+Install https://github.com/yw0nam/YUI following https://raw.githubusercontent.com/yw0nam/YUI/main/docs/guide/install.md
+```
 
-Voice in/out are optional add-ons — see the
-[install guide](docs/guide/getting-started.md) for TTS/STT and the full backend
-wiring.
+The agent installs the toolchain, clones the repo, wires the backend you name, and hands you `pnpm tauri dev`.
+
+No agent at hand? Grab the macOS (Apple Silicon) `.dmg` or the experimental Windows x64 installer from the [latest release](https://github.com/yw0nam/YUI/releases/latest). The builds are unsigned: open the app once, and when macOS blocks it, allow it under **System Settings → Privacy & Security → Open Anyway**. Official builds target macOS on Apple Silicon; Intel Macs and Linux are not officially supported.
+
+**First chat:** right-click the character to open Settings, switch to the **Connection** tab (plug icon), and pick a **Provider** preset in the Chat section, fill in **Chat model** (and **Chat API key** for OpenAI or Groq), close the panel, press `/` (or `Cmd/Ctrl+Shift+Y`) to open the text input, and send a message.
+The preset — OpenAI, Ollama, LM Studio, or Groq — autofills the endpoint URL; the prerequisite is a running [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai), or an OpenAI or Groq API key.
+The default Chat Completions mode needs a model with tool calling, since YUI always declares its `generate_express` tool (`src/io/chat/stream/chat-client.ts`): [`gpt-5-mini`](https://platform.openai.com/docs/models/gpt-5-mini) on OpenAI, [`qwen3`](https://ollama.com/library/qwen3) on Ollama (pull it first with `ollama pull qwen3`), [`llama-3.3-70b-versatile`](https://console.groq.com/docs/tool-use) on Groq.
 
 ## Features
 
-**Agent**
+### She lives on your windows
 
-- Two chat protocols, selected by `chat_api` in `configs/endpoints.json`: a
-backend agent honoring YUI's expression contract over the OpenAI Responses
-API, or any tool-calling OpenAI-compatible Chat Completions endpoint — no
-fixed embedded model
-- Emotion, motion, and voice cues arrive as structured `generate_express`
-tool-calls, never as inline tags in the text — in both chat modes
-- YUI publishes its emotion/motion/voice vocabulary to the Expression Broker
-(MCP) in both chat modes, write-only and gated only on `broker_base_url`;
-a backend agent reads it back via `get_ids` and emits cues as
-`generate_express` tool-calls
-- In Chat Completions mode YUI declares `generate_express` itself, with that
-same vocabulary in the tool schema, runs the call locally and returns the
-result — expression on a bare model endpoint, no broker required
+<img src="docs/public/yui-locomotion.gif" alt="YUI walking along the bottom of the screen, climbing the side of the screen, jumping onto a window top and sitting on its edge, and falling to the floor after being dropped in mid-air" width="720">
 
-**Voice &amp; chat**
+She perches on a window top, peeks around a side edge, strolls the floor and window
+tops, and jumps between windows. Dropped in mid-air, she falls to the first surface
+below and lands. Climbing a window side or a screen edge onto the monitor above is
+in development and carries that label in the app.
 
-- Speech input — Silero VAD + ONNX segment your voice, then an
-OpenAI-compatible endpoint transcribes it
-- Speech output — sentence-queued TTS with ordered playback and per-sentence
-voice cues
-- Amplitude lipsync drives the mouth from audio, with a user gain slider
-- Streaming, markdown-rendered speech bubble that fades in only when she speaks
+### Any backend, embodied through structured cues
 
-**Desktop pet**
+<img src="docs/public/yui-feature-cues.jpg" alt="YUI laughing with a hand over her mouth and her eyes closed in a happy expression, above a speech bubble that reads: The build passed. Want me to open the pull request for review?" width="360">
 
-- Sits on the top edge of a window and detaches when the window moves, closes,
-or gets covered
-- OS-native dragging on a transparent, always-on-top, multi-monitor overlay
-- Idle liveliness — blink, sway, breathing, and look-around run locally even
-with no backend connected, and respect `prefers-reduced-motion`
-- Reads OS-wide idle time and an optional user-toggled screenshot and feeds
-them to the agent each turn; the frontmost app/window is a pull tool the
-agent calls via the `desktop-control` Mod, not a per-turn push
+YUI talks to an OpenAI-compatible Chat Completions endpoint, a Responses API agent,
+or a backend on the push WebSocket. Emotion, motion, voice tag, and caption arrive
+as `generate_express` cues beside the reply text.
 
-**Rendering &amp; motion**
+### She speaks first, with restraint
 
-- VRM 1.0 with hot-swap and GPU cleanup, via three.js + `@pixiv/three-vrm`
-- 10 emotions and 25 registered motions, 9 of them agent-selectable, with a
-fallback chain for models that lack an expression
-- Idle and sit cycle through pools of motion clips with smooth transitions
-- Camera auto-frames the avatar, with wheel zoom and a pull-back when perched
+<img src="docs/public/yui-feature-proactive.png" alt="The Proactive settings tab: screen watch, loop reactions after 5, 10, and 30 minutes of inactivity, scheduled greetings at 09:00, 12:00, 18:00, and 23:00, a 10-minute proactive gap, and hourly limits of 24 cues and 40 self-started turns" width="400">
 
-**Platform**
+Scheduled greetings, idle check-ins, screen-watch cues, the first activity of the
+day, and external `/signals` each open a turn. Debounce, hourly
+caps, and a quiet gap after each turn pace them, and the backend answers any cue
+with silence when it chooses.
 
-- UI in English, 日本語, and 한국어, with a persisted locale
-- Endpoints, models, VRM paths, and motion sets all live in `configs/` — nothing
-is hardcoded
-- macOS-first; Windows x64 builds are experimental
+Everything else, from lipsync and touch reactions to Mods and the witness log, is in the [feature list](docs/guide/features.md).
+
+## Supported providers
+
+The Connection tab in Settings selects each provider. The
+[wiring guide](docs/guide/getting-started.md) covers the setup. To request a
+provider the tables leave out, open a
+[feature issue](https://github.com/yw0nam/YUI/issues/new?template=feature_task.md)
+or send a PR.
+
+### Chat
+
+| Provider | Protocol (`chat_api`) | Hosting | Example model |
+| --- | --- | --- | --- |
+| OpenAI | `chat_completions` | Hosted, API key | `gpt-5-mini` |
+| Ollama | `chat_completions` | Local | `qwen3` |
+| LM Studio | `chat_completions` | Local | Any tool-calling model |
+| Groq | `chat_completions` | Hosted, API key | `llama-3.3-70b-versatile` |
+| [Hermes Agent](integrations/hermes/README.md) | `push`, `responses` | Self-hosted | The model the agent runs |
+| Custom endpoint | `chat_completions`, `responses`, `push` | Any server that speaks the protocol | Tool-calling model on `chat_completions` |
+
+### TTS
+
+| Provider | Hosting | Default model | Voices |
+| --- | --- | --- | --- |
+| [Irodori](https://github.com/Aratako/Irodori-TTS-Server) | Self-hosted | `irodori-tts` | The server's voices and imported reference clips, Japanese only |
+| OpenAI | Hosted, API key | `gpt-4o-mini-tts` | 13 built-in voices |
+| [Fish Audio](https://fish.audio/) | Hosted, API key | `s2.1-pro-free` | Your account's voice models, imported clips, and any library voice id |
+
+### STT
+
+| Provider | Hosting | Setup |
+| --- | --- | --- |
+| Any OpenAI-compatible transcription endpoint (`/audio/transcriptions`) | Local or hosted | `stt_base_url` |
+| Groq | Hosted, API key | `stt_base_url` and `stt_model`, for example `whisper-large-v3-turbo` |
 
 ## How it works
 
@@ -125,152 +135,19 @@ client does is notice moments worth reacting to (you typing, going idle, an app
 coming to focus) and hand them to the agent, which decides whether and how to
 respond.
 
-Cues ride alongside the reply. Speech comes through as a normal assistant text
-stream, while emotion, motion, and voice tags arrive as `generate_express`
-tool-calls with flat arguments
-`{ emotion_id?, motion_id?, emotion_text?, caption? }`.
-`emotion_text` is a TTS voice tag drawn from the emoji vocabulary the Expression
-Broker publishes so the agent knows what it can ask for. Both chat modes carry
-them; see [Backend wiring](#backend-wiring) for how the transport differs by
-chat protocol and backend. The full cue contract handed to the
-backend lives in [`docs/reference/client-context.md`](docs/reference/client-context.md).
-
-## Stack
-
-Tauri v2 (Rust) shell, Vite + TypeScript build, three.js rendering with
-`@pixiv/three-vrm` for the VRM model, and `@ricky0123/vad-web` (Silero + ONNX)
-for voice input. Exact versions are in the
-[stack table](docs/agent-guide/project-structure.md#stack).
-
-## Building from source
-
-Using Claude Code? Open the repo and type `/yui-install` — the skill checks
-prerequisites, installs, verifies the build, and writes any wiring you want.
-Manual steps follow.
-
-**Prerequisites**
-
-- Node + [pnpm](https://pnpm.io/)
-- Rust + the [Tauri v2](https://v2.tauri.app/start/prerequisites/) toolchain
-
-**Commands**
-
-```bash
-pnpm install
-pnpm dev                    # Vite dev server (port 1420), browser only
-pnpm tauri dev              # Tauri app (port 1420), transparent pet window
-pnpm build                  # tsc + vite build
-```
-
-The full command list — lint, tests, native bundling, and the Rust checks —
-is in [Build, Run &amp; Logs](docs/agent-guide/build-run.md#build--run).
-
-**Runtime assets.** A default VRM (`resources/vrms/Sendagaya_Shino.vrm`) ships
-in the repo, so a fresh checkout runs as-is. Extra models under `resources/vrms/`
-and `.env.local` (`VITE_YUI_CHAT_KEY`, optional — the in-app key field works
-too) are gitignored; `scripts/worktree-setup.sh` links the VRMs and copies
-`.env.local` into a new worktree.
-
-For the backend services and full wiring, see [`docs/guide/getting-started.md`](docs/guide/getting-started.md).
-
-## Backend wiring
-
-Chat, STT and TTS use the OpenAI-compatible API; the Expression Broker is an MCP
-server. Each is a separate, config-swappable process, and all base URLs live in
-`configs/endpoints.json`.
-
-- **Chat protocol** — selected via `chat_api` (default `chat_completions`):
-  - `responses` — routes to a backend agent (for example Hermes Agent) over
-  `/v1/responses` (e.g. `localhost:8643`)
-  - `chat_completions` — connects over the Chat Completions API to any
-  tool-calling OpenAI-compatible endpoint; the client declares
-  `generate_express` with its own vocabulary, executes the call and returns
-  the result, and keeps the conversation transcript client-side (no
-  `previous_response_id`), trimmed to `chat_model_context_window`
-  
-  | Mode               | Speech text | `generate_express` cues                                             |
-  | ------------------ | ----------- | ------------------------------------------------------------------- |
-  | `responses`        | yes         | yes — the backend agent emits them as function-call items           |
-  | `chat_completions` | yes         | yes — the client declares the tool, runs it, and returns the result |
-  
-
-  Backend capability still varies: a plain OpenAI-compatible server (e.g.
-  vLLM) speaks standard Chat Completions tool-call streaming, while the
-  Hermes api-server's `/v1/chat/completions` never surfaces tool calls — it
-  emits a custom `hermes.tool.progress` telemetry event with no arguments
-  instead. With Hermes, use `responses` mode for cues.
-- **STT** — `<stt_base_url>/audio/transcriptions` (e.g. `localhost:5517/v1`)
-- **TTS** — OpenAI-compatible `/v1/audio/speech` (e.g. `localhost:8088`), with
-`model` from `tts_model` and `voice` from the speaker picked in the panel.
-The TTS server is the source of truth for the speaker list
-(`GET /v1/audio/voices`) — users add their own via the panel's import button,  
-which uploads the clip to `/v1/audio/voices`. [Irodori TTS Server](https://github.com/Aratako/Irodori-TTS-Server)
-is the recommended server for Japanese TTS.
-- **Expression Broker** — streamable-http MCP (e.g. `localhost:3201/mcp`); YUI
-publishes its emotion/motion/voice vocabulary here in both chat modes,
-gated only on `broker_base_url` (skipped if unset) — the backend agent
-behind either endpoint reads it back via `get_ids`
-
-The client calls STT and TTS directly — they do not route through Hermes.
-
-## Project layout
-
-```
-YUI/
-  configs/                # Runtime config: endpoints, emotion + motion registries, voice vocab, avatar, hotkeys, screen, guardrails, filler
-  resources/vrms/         # VRM models — bundled default (tracked) + your own (gitignored)
-  public/motions/         # VRMA motion assets
-  public/vad/             # Silero VAD + ONNX runtime assets
-  scripts/                # dev-port / worktree helpers
-  src/
-    contract/             # TS contract types — source of truth
-    renderer/             # three.js + VRM: load, emotion resolver, motion controller, lipsync
-    io/                   # chat, tts, stt, os-context, screenshot, broker
-    dispatcher/           # Event bus + classify → route
-    ambient/              # Local idle liveliness (blink / sway / breath)
-    config/               # Config load, validate, hot-reload
-    ui/                   # Speech bubble, input, tool-status surfaces
-  src-tauri/src/
-    drag.rs               # OS-native window drag
-    passthrough.rs        # Click-through over transparent pixels
-    screenshot.rs         # Monitor capture
-    tray.rs               # System tray
-    agent_ingress.rs      # Loopback /signals ingress: coding-agent hooks + remote signal batches
-    vrm_import.rs         # Bring-your-own VRM copy into app data
-    voice_import.rs       # Reference-clip import for TTS voices
-    os_event_watcher/     # Idle / frontmost polling (macos · windows)
-  tests/                  # Non-colocated Vitest suites (scripts, hooks, CI); the rest sit beside src/
-  docs/                   # Backend contract + human-facing catalogs
-  Mods/                   # Standalone MCP servers, independent of the app
-```
-
-Optional standalone **Mods** — independent MCP servers that extend the backend
-agent: `desktop-control` (screen, activity log, app launch/quit), `avatar`
-(body state + semantic moves), `shell-sandbox`, and a `router` front door —
-live under [`Mods/`](Mods/README.md), separate from the app runtime.
-
-## Logs
-
-Frontend and Rust logs merge into one file via `tauri-plugin-log`. Frontend
-lines come from `src/logger.ts` (`[YUI][namespace] …`); Rust lines use the `log`
-crate.
-
-- **Dev** — `<repo>/logs/` (gitignored). Tail with `tail -f logs/*.log`.
-- **Release (macOS)** — `~/Library/Logs/com.yui.desktop/`.
-
-Default level is `debug` in dev and `warn` in release; override the frontend
-level with `VITE_YUI_LOG_LEVEL` (`debug` · `info` · `warn` · `error`).
-
 ## Documentation
 
-- [`AGENTS.md`](AGENTS.md) — project orientation (architecture, core principle, doc index); development work rules and the delegation model live in the `yui-dev-workflow` skill
-- [`PRODUCT.md`](PRODUCT.md) / [`DESIGN.md`](DESIGN.md) — product register + design system
-- [`docs/guide/getting-started.md`](docs/guide/getting-started.md) — install and wiring (broker · agent · TTS · STT · VRM)
-- [`docs/reference/client-context.md`](docs/reference/client-context.md) — the `generate_express` cue contract
-- [`docs/reference/motions.md`](docs/reference/motions.md) — motion catalog
-- [`docs/reference/tts-emotion/`](docs/reference/tts-emotion/) — the `emotion_text` voice-tag vocabulary
-- [`docs/reference/logging.md`](docs/reference/logging.md) — logging convention
-- [`src/contract/types.ts`](src/contract/types.ts) — TS contract shapes
+- [Feature list](docs/guide/features.md)
+- [Controls](docs/guide/controls.md): keyboard, mouse, and tray
+- [What she can do](docs/guide/capabilities.md)
+- [Install with a coding agent](docs/guide/install.md)
+- [Install and wiring guide](docs/guide/getting-started.md): chat backend, Expression Broker, TTS, STT, your own VRM
+- [Build, run, and logs](docs/agent-guide/build-run.md)
+- [Project structure and stack](docs/agent-guide/project-structure.md)
+- [`generate_express` cue contract](docs/reference/client-context.md)
+- [`AGENTS.md`](AGENTS.md): orientation for coding agents working on this repo
+- [`CONTEXT.md`](CONTEXT.md): glossary — the canonical vocabulary (head / brain, firing, express cues)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## Credits
 
@@ -288,8 +165,10 @@ The `sulk` clip (`suneru.vrma`) is from necocoya's
 and bundling-with-credit are permitted; standalone resale of the raw file is
 prohibited.
 
-The `falling` and `landing` clips (`falling_loop.vrma`, `landing.vrma`) are
-original works authored in Blender by the project author.
+The locomotion clips `walk`, `jump`, `falling`, `landing`, the climb set
+(`climb_up`, `climb_up_done`, `climb_down`, `climb_down_landing`), `sit_down`
+and `stand_up` are from [Mixamo](https://www.mixamo.com/), royalty-free under
+the Mixamo terms.
 
 The bundled default VRM model
 (`resources/vrms/Sendagaya_Shino.vrm`) is **Sendagaya Shino**, originally by

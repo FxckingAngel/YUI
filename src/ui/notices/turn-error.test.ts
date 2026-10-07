@@ -51,7 +51,7 @@ describe("turnErrorMessage", () => {
       setLocale(locale);
       const message = turnErrorMessage("not_configured");
       expect(message).toBeTruthy();
-      expect(message).not.toContain(t("tabs.adv"));
+      expect(message).not.toContain(t("tabs.conn"));
     }
   });
 
@@ -70,25 +70,59 @@ describe("turnErrorMessage", () => {
   });
 });
 
+describe("turnErrorMessage — server error detail", () => {
+  beforeEach(() => setLocale("en"));
+  afterEach(() => setLocale("en"));
+
+  it("renders status + server message when a 400 detail rides a network_drop", () => {
+    expect(
+      turnErrorMessage("network_drop", {
+        status: 400,
+        message: "model does not support tools",
+      }),
+    ).toBe("400 model does not support tools");
+  });
+
+  it("renders status + server message for a 500 detail", () => {
+    expect(
+      turnErrorMessage("network_drop", { status: 500, message: "internal server error" }),
+    ).toBe("500 internal server error");
+  });
+
+  it("collapses newlines and cuts a 300-char message to one line of at most 200 chars ending with …", () => {
+    const message = Array.from({ length: 300 }, (_, i) => (i % 25 === 24 ? "\n" : "x")).join("");
+    const rendered = turnErrorMessage("network_drop", { status: 500, message });
+    expect(rendered).toBeDefined();
+    expect(rendered).not.toContain("\n");
+    expect(rendered!.length).toBeLessThanOrEqual(200);
+    expect(rendered!.endsWith("…")).toBe(true);
+  });
+});
+
 describe("turnErrorFixAction", () => {
   beforeEach(() => setLocale("en"));
   afterEach(() => setLocale("en"));
 
-  it("gives not_configured a labeled action that opens the Advanced tab", () => {
+  it("gives not_configured a labeled action that opens the Connection tab", () => {
     const openSettings = vi.fn();
 
     const action = turnErrorFixAction("not_configured", openSettings);
 
-    expect(action?.label).toBe(t("input.error_open_advanced"));
+    expect(action?.label).toBe(t("input.error_open_connection"));
     action?.onClick();
-    expect(openSettings).toHaveBeenCalledWith("adv");
+    expect(openSettings).toHaveBeenCalledWith("conn");
   });
 
-  it("names the Advanced tab on the label, in every locale", () => {
+  it("names the Connection tab on the label, in every locale", () => {
     for (const locale of ["en", "ko", "ja"] as const) {
       setLocale(locale);
-      expect(turnErrorFixAction("not_configured", () => {})?.label).toContain(t("tabs.adv"));
+      expect(turnErrorFixAction("not_configured", () => {})?.label).toContain(t("tabs.conn"));
     }
+  });
+
+  it("offers nothing when the host has no settings opener", () => {
+    expect(turnErrorFixAction("not_configured")).toBeUndefined();
+    expect(turnErrorFixAction("not_configured", () => {})).toBeDefined();
   });
 
   it("offers nothing for failures the settings panel cannot fix", () => {

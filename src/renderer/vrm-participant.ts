@@ -12,10 +12,10 @@
 
 import type { VRM } from "@pixiv/three-vrm";
 import type { PerspectiveCamera } from "three";
-import type { CursorGaze } from "./expression/cursor-gaze";
 import type { EmotionCrossfade } from "./expression/emotion-crossfade";
+import type { CursorGaze } from "./expression/gaze/cursor-gaze";
 import type { MouthLipsync } from "./expression/mouth-lipsync";
-import { isMouthConverging } from "./geometry/frame-gate";
+import { isMouthConverging } from "./frame-gate";
 import type { PinController } from "./pin-controller";
 
 /** Per-frame context passed to every participant's step, before vrm.update(dt). */
@@ -74,10 +74,9 @@ interface VrmParticipantSubControllers {
 
 /**
  * Build the fixed-order VrmParticipant array — pins/gaze (bones) before
- * emotion/mouth (expression weights), matching animate()'s original
- * pins.step → gaze.step → emotion.step → mouth.step order (all before
- * vrm.update). Each sub-controller's methods are closures (no `this`), so
- * referencing them unbound (`pins.onVrmLoaded` rather than
+ * emotion/mouth (expression weights): pins.step → gaze.step →
+ * emotion.step → mouth.step, all before vrm.update. Each sub-controller's methods are closures
+ * (no `this`), so referencing them unbound (`pins.onVrmLoaded` rather than
  * `(v) => pins.onVrmLoaded(v)`) is safe.
  */
 export function buildVrmParticipants(deps: VrmParticipantSubControllers): VrmParticipant[] {

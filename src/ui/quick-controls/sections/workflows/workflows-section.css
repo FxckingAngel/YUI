@@ -1,0 +1,107 @@
+/* ── Workflows — saved webhook rows in one group, the add form in the next ── */
+.yui-wf {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3rem;
+  padding: 0.625rem 0.875rem;
+}
+
+.yui-wf__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--yui-text);
+  font-size: var(--yui-fs-body);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yui-wf__fire,
+.yui-wf__delete {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--yui-radius-control);
+  background: transparent;
+  color: var(--yui-text-mute);
+  cursor: pointer;
+}
+
+.yui-wf__fire {
+  transition:
+    background var(--yui-dur-fast) var(--yui-ease),
+    color var(--yui-dur-fast) var(--yui-ease);
+}
+
+.yui-wf__fire:hover {
+  background: var(--yui-accent-faint);
+  color: var(--yui-accent);
+}
+
+.yui-wf__fire:focus-visible,
+.yui-wf__delete:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--yui-accent-soft);
+}
+
+.yui-wf__fire svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.yui-wf--fired-ok .yui-wf__fire {
+  background: var(--yui-accent-faint);
+  color: var(--yui-accent);
+}
+
+.yui-wf--fired-err .yui-wf__fire {
+  background: var(--yui-danger-faint);
+  color: var(--yui-danger);
+}
+
+.yui-wf__delete {
+  opacity: 0;
+  transition:
+    opacity var(--yui-dur-fast) var(--yui-ease),
+    background var(--yui-dur-fast) var(--yui-ease),
+    color var(--yui-dur-fast) var(--yui-ease);
+}
+
+.yui-wf:hover .yui-wf__delete,
+.yui-wf:focus-within .yui-wf__delete {
+  opacity: 0.65;
+}
+
+.yui-wf__delete:hover,
+.yui-wf__delete:focus-visible {
+  background: var(--yui-danger-faint);
+  color: var(--yui-danger);
+  opacity: 1;
+}
+
+.yui-wf__delete svg {
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
+.yui-wf-empty {
+  margin: 0;
+  padding: 0.625rem 0.875rem;
+  color: var(--yui-text-mute);
+  font-size: var(--yui-fs-sub);
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yui-wf__delete,
+  .yui-wf__fire {
+    transition-duration: 0ms !important;
+  }
+}

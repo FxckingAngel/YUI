@@ -5,14 +5,14 @@
  *  1. event_bus.pop() → classify → tier.
  *  2. evaluate via guardrails — user_input passes with dnd_override=true.
  *  3. conflict resolution: user.text_submitted arrives → abort in-flight backend +
- *     drop tier2/3 from the queue (superseded_by_user).
+ *     drop tier2 from the queue (superseded_by_user).
  *  4. Routing:
  *     · tier1 (drag/window/tap/pat reactions, avatar.* gait cues, user.fall_land) → local
  *       handling (no backend).
- *     · tier2/3 (user.text_submitted · user.voice_segment_ready · time_milestone.* ·
+ *     · tier2 (user.text_submitted · user.voice_segment_ready · time_milestone.* ·
  *       proactive.* · schedule.* · agent.* · signals.*) → backend_caller.
  *
- * Single in-flight backend call. Deferred tier2/3 keeps only one item in local pending
+ * Single in-flight backend call. Deferred tier2 keeps only one item in local pending
  * (with two or more deferred, the oldest is dropped).
  *
  * Every started turn anchors the global proactive gap. A fire from a paced source (loop cues,
@@ -21,25 +21,30 @@
  *
  * state: booting → (start) → running → (stop) → stopped. cooldown polls the guardrails'
  *   overall-cap verdict every tick to transition running↔cooldown. degraded is entered when
- *   the backend call fails DEGRADED_FAILURE_THRESHOLD times in a row — during it, tier2/3
+ *   the backend call fails DEGRADED_FAILURE_THRESHOLD times in a row — during it, tier2
  *   (non-user) is dropped as degraded_drop, while user-initiated (dnd_override) turns keep
  *   going out to backend_caller without a gate (judgment belongs to the backend). A single
  *   successful call immediately returns to running and resets the consecutive-failure counter.
  * observable: queue() / recentDrops(n) / inFlight().
  */
 
-import type { PeekConfig, TapConfig } from "../config/load";
+import type { PeekConfig, TapConfig } from "../config/validators/avatar/types";
 import type { BodyState, Posture } from "../contract";
-import { buildPacerSkipRecord, type PacerSkipRecord } from "../io/chat/turn-record-log";
+import { buildPacerSkipRecord, type PacerSkipRecord } from "../io/chat/record/turn-record-log";
 import type { Logger, LogLevel } from "../logger";
 import { createLogger } from "../logger";
 import type { Renderer } from "../renderer";
-import type { BackendCaller, TurnFailure, TurnOutcome } from "./backend/backend-caller";
+import type {
+  BackendCaller,
+  TurnErrorDetail,
+  TurnFailure,
+  TurnOutcome,
+} from "./backend/backend-caller";
 import { classify, PACED_SOURCES, type UserTurnSource, userTurnSourceOf } from "./core/classify";
 import type { BusEnvelope, EventBus } from "./core/event-bus";
 import type { Guardrails } from "./core/guardrails";
 import type { ProactivePacer } from "./core/proactive-pacer";
-import { createTier1Render } from "./core/tier1-render";
+import { createTier1Render } from "./tier1/render";
 import type { Turn, TurnLog } from "./turn/turn";
 
 const baseLog = createLogger("dispatcher");
@@ -74,24 +79,26 @@ interface DispatcherDeps {
   pacer?: Pick<ProactivePacer, "isHolding" | "noteTurnStart">;
   /** Skip-record JSONL sink — best-effort disk log of the fires the pacer held back. */
   appendSkipRecord?: (record: PacerSkipRecord) => void;
-  /** pump interval (ms). default 16 (roughly rAF). Tests advance with a fake timer. */
-  pumpIntervalMs?: number;
   /**
    * Report a backend call failure of a user-initiated turn (user.text_submitted /
    * user.voice_segment_ready) along with its source (which trigger it was) —
-   * superseded_by_user is excluded since it is not an error.
-   * main.ts wires this to the UI error surface (showInputError / voice-input-indicator).
+   * superseded_by_user is excluded since it is not an error. detail rides when the backend
+   * answered the call with an HTTP error (status + bare server message).
+   * main.ts wires this to the UI error surface (showInputError / the status pill's voice segment).
    * proactive/schedule/agent turn failures are only logged and never surface here (silent by design).
    */
   onUserTurnFailed?: (
     reason: Exclude<TurnFailure, "superseded_by_user">,
     source: UserTurnSource,
+    detail?: TurnErrorDetail,
   ) => void;
   /**
    * A backend call of any turn settled in a failure, reported with the turn it belonged to.
    * superseded_by_user returns early and never reaches this.
    */
   onTurnFailed?: (turn: Turn, reason: TurnFailure) => void;
+  /** The dispatcher admitted a trigger: the turn it opened, reported before its backend call starts. */
+  onTurnAdmitted?: (turn: Turn) => void;
   /** Structured logging (defaults to the dispatcher namespace logger). */
   logger?: Logger;
 }
@@ -144,10 +151,8 @@ export interface Dispatcher {
   getBodyState(): BodyState;
   /** The avatar relocated on its own initiative (move_to) — restamps posture to standing/now. */
   noteAvatarMoved(): void;
-  /** Abort the in-progress call + drop deferred tier2/3 (client-only). Does not sweep the bus or touch tier1. */
+  /** Abort the in-progress call + drop deferred tier2 (client-only). Does not sweep the bus or touch tier1. */
   cancel(): void;
-  /** Subscribe to state transitions. Callback runs on every transition; returns an unsubscribe fn. */
-  subscribeState(cb: (s: DispatcherState) => void): () => void;
   /** Subscribe to busy (= in-flight presence) transitions. Runs only at the idle⟷busy boundary; returns an unsubscribe fn. */
   subscribeBusy(cb: (busy: boolean) => void): () => void;
   /** Whether the pipeline is busy — in-flight call OR speech still playing. Separate from subscribeBusy (in-flight-only). */
@@ -163,7 +168,6 @@ const DEGRADED_FAILURE_THRESHOLD = 3;
 
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
   const { bus, renderer, backendCaller, guardrails } = deps;
-  const pumpMs = deps.pumpIntervalMs ?? DEFAULT_PUMP_MS;
   const log = deps.logger ?? baseLog;
 
   let state: DispatcherState = "booting";
@@ -171,7 +175,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
 
   // Single in-flight backend call (only one; the rest are deferred).
   let inFlight: { trigger: BusEnvelope; started_at: number; abort: AbortController } | null = null;
-  // Deferred tier2/3 (with two or more, the oldest is dropped).
+  // Deferred tier2 (with two or more, the oldest is dropped).
   const pending: BusEnvelope[] = [];
   const drops: DropRecord[] = [];
   /** The turn whose summary line has not been emitted yet. */
@@ -192,7 +196,6 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     log,
   });
 
-  const stateSubscribers = new Set<(s: DispatcherState) => void>();
   const busySubscribers = new Set<(busy: boolean) => void>();
 
   /** Pipeline-busy = the ledger has a live turn (in flight, or settled with audio still owed). */
@@ -225,13 +228,12 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     if (over) closeTurn();
   });
 
-  /** Single path for state transitions: assign + state_change log + notify subscribers. */
+  /** Single path for state transitions: assign + state_change log. */
   function setState(next: DispatcherState): void {
     if (next === state) return;
     const from = state;
     state = next;
     log.info("state_change", { from, to: next });
-    for (const cb of stateSubscribers) cb(next);
   }
 
   /** Single path for in-flight assignment: notify subscribers only at the idle⟷busy boundary (null↔non-null). */
@@ -281,9 +283,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
   }
 
   /**
-   * user.text_submitted arrives → abort in-flight + drop all deferred tier2/3 +
-   * sweep and drop any tier2/3 still left in the bus. tier1 is processed immediately and kept.
-   * (Since the bus is a priority queue where user pops first, this also clears trailing tier2/3
+   * user.text_submitted arrives → abort in-flight + drop all deferred tier2 +
+   * sweep and drop any tier2 still left in the bus. tier1 is processed immediately and kept.
+   * (Since the bus is a priority queue where user pops first, this also clears trailing tier2
    * from the same pump here.)
    */
   function supersedeByUser(): void {
@@ -295,7 +297,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     while (pending.length > 0) {
       recordDrop(pending.shift()!, "superseded_by_user");
     }
-    // Sweep tier2/3 left in the bus: drop what would go to the backend, render tier1 immediately to preserve it.
+    // Sweep tier2 left in the bus: drop what would go to the backend, render tier1 immediately to preserve it.
     let env: BusEnvelope | null;
     const tier1Leftover: BusEnvelope[] = [];
     while ((env = bus.pop()) !== null) {
@@ -310,7 +312,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     for (const t of tier1Leftover) tier1.render(t);
   }
 
-  /** Start a tier2/3 backend call (occupies in-flight). On completion, free the slot and drain one deferred item. */
+  /** Start a tier2 backend call (occupies in-flight). On completion, free the slot and drain one deferred item. */
   function startBackendCall(env: BusEnvelope): void {
     deps.pacer?.noteTurnStart();
     const abort = new AbortController();
@@ -320,8 +322,14 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     closeTurn();
     const turn = deps.turnLog.begin(env);
     openTurn = { id: turn.id, trigger: env.event_name, started_at, outcome: null };
+    deps.onTurnAdmitted?.(turn);
+    // Server-side HTTP error detail, kept per call so a superseded turn's late detail
+    // can never bleed into the next one.
+    let errorDetail: TurnErrorDetail | undefined;
     void backendCaller
-      .call(turn, abort.signal)
+      .call(turn, abort.signal, (detail) => {
+        errorDetail = detail;
+      })
       .then((outcome) => {
         if (openTurn?.id === turn.id) openTurn.outcome = outcome;
         if (outcome === "ok") {
@@ -333,7 +341,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         deps.onTurnFailed?.(turn, outcome);
         noteCallFailure();
         const source = userTurnSourceOf(env);
-        if (source) deps.onUserTurnFailed?.(outcome, source);
+        if (source) deps.onUserTurnFailed?.(outcome, source, errorDetail);
       })
       .catch((err) => {
         if (openTurn?.id === turn.id) openTurn.outcome = "network_drop";
@@ -342,7 +350,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         deps.onTurnFailed?.(turn, "network_drop");
         noteCallFailure();
         const source = userTurnSourceOf(env);
-        if (source) deps.onUserTurnFailed?.("network_drop", source);
+        if (source) deps.onUserTurnFailed?.("network_drop", source, errorDetail);
       })
       .finally(() => {
         // Release the slot only if this call is still the current in-flight (leave it if replaced by an abort).
@@ -386,7 +394,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     return userTurnSourceOf(head) === undefined && deps.hasOutstandingSpeech();
   }
 
-  /** tier2/3 enqueue: start immediately if in-flight is empty, otherwise defer (with two or more, drop the oldest). */
+  /** tier2 enqueue: start immediately if in-flight is empty, otherwise defer (with two or more, drop the oldest). */
   function enqueueBackend(env: BusEnvelope): void {
     if (!inFlight && pending.length === 0 && !shouldHoldForPlayback(env)) {
       startBackendCall(env);
@@ -425,14 +433,14 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       supersedeByUser();
     }
 
-    const { tier, target } = classify(env);
-    if (target === "tier1") {
+    const classified = classify(env);
+    if (classified.target === "tier1") {
       // tier1 is never gated (independent of guardrails/cooldown).
       tier1.render(env);
       return;
     }
-    if (target === "backend_caller") {
-      // During degraded, drop non-user (not dnd_override) tier2/3 before gate —
+    if (classified.target === "backend_caller") {
+      // During degraded, drop non-user (not dnd_override) tier2 before gate —
       // keep passing user-initiated turns to delegate judgment to backend.
       if (state === "degraded" && env.dnd_override !== true) {
         recordDrop(env, "degraded_drop");
@@ -444,13 +452,13 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         dropForPacer(env);
         return;
       }
-      // After classifying to get tier, evaluate. If drop, don't enqueue.
-      const verdict = guardrails.evaluate(env, tier);
+      // Evaluate. If drop, don't enqueue.
+      const verdict = guardrails.evaluate(env);
       if (!verdict.pass) {
         recordDrop(env, verdict.reason);
         return;
       }
-      log.info("fire", { seq_id: env.seq_id, event_name: env.event_name, tier });
+      log.info("fire", { seq_id: env.seq_id, event_name: env.event_name, tier: classified.tier });
       enqueueBackend(env);
       return;
     }
@@ -483,7 +491,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         timer = null;
       }
       setState("running");
-      timer = setInterval(pump, pumpMs);
+      timer = setInterval(pump, DEFAULT_PUMP_MS);
       // Drain once immediately (handle event pushed before first tick).
       pump();
     },
@@ -532,12 +540,6 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       while (pending.length > 0) {
         recordDrop(pending.shift()!, "superseded_by_user");
       }
-    },
-    subscribeState(cb) {
-      stateSubscribers.add(cb);
-      return () => {
-        stateSubscribers.delete(cb);
-      };
     },
     subscribeBusy(cb) {
       busySubscribers.add(cb);

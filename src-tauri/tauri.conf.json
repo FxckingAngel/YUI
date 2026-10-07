@@ -5,7 +5,7 @@
   "identifier": "com.yui.desktop",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build"
   },
@@ -26,10 +26,10 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost https: data: blob:; media-src 'self' asset: http://asset.localhost blob: https:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost ws: wss: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src 'none'; form-action 'none'",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$RESOURCE/**/*", "$APPDATA/vrms/**/*", "$APPDATA/references/**/*"]
+        "scope": ["$RESOURCE/**/*", "$APPDATA/vrms/**/*", "$APPDATA/references/**/*", "$APPDATA/stage/**/*"]
       }
     }
   },

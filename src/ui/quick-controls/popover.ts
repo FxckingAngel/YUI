@@ -43,6 +43,8 @@ interface PopoverDeps {
   isWindow: boolean;
   /** Window variant only — injected by the host when Escape must close the OS window. Without it, Escape is a no-op. */
   closeWindow?: () => void;
+  /** Height in CSS px of the window part that is on screen; the panel stays inside it. */
+  visibleHeight?: () => number;
   /** Refresh content on open (reflect/render/monitor load). Called before positioning so dimensions are settled. */
   onOpen: () => void;
   /** Cleanup on close (gain preview, audition, key commit). Called before openState=false. */
@@ -57,7 +59,7 @@ interface Popover {
 }
 
 export function createPopover(deps: PopoverDeps): Popover {
-  const { mount, root, scrim, bar, isWindow, closeWindow, onOpen, onClose } = deps;
+  const { mount, root, scrim, bar, isWindow, closeWindow, visibleHeight, onOpen, onClose } = deps;
 
   let openState = false;
   let closeRafId: number | null = null;
@@ -67,7 +69,7 @@ export function createPopover(deps: PopoverDeps): Popover {
   const FOCUSABLE_SEL =
     'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
 
-  // True for content a collapsed <details> (a section or an Advanced-tab endpoint group) hides —
+  // True for content a collapsed <details> (the filler's more-phrases group) hides —
   // its own <summary> stays reachable (that's how the user reopens it via keyboard), everything
   // else inside its collapsed body does not.
   function isInsideClosedDetails(el: HTMLElement): boolean {
@@ -77,25 +79,32 @@ export function createPopover(deps: PopoverDeps): Popover {
   }
 
   function focusables(): HTMLElement[] {
-    // Exclude controls in [hidden] subtrees (e.g. inactive tab panels) so the trap doesn't leak to an invisible end.
+    // Exclude controls in [hidden] subtrees (e.g. inactive tab panels) so the trap doesn't leak to an invisible end,
+    // and roving-tabindex members Tab skips (unselected tabs and segment cells).
     return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SEL)).filter(
       (el) =>
         !(el as HTMLButtonElement).disabled &&
+        el.tabIndex >= 0 &&
         !el.closest("[hidden]") &&
         !isInsideClosedDetails(el),
     );
   }
 
+  // No ring on open — a pointer-opened panel stays unlit until the user tabs.
   function focusFirst(): void {
-    focusables()[0]?.focus();
+    focusables()[0]?.focus({ focusVisible: false });
   }
 
   // ── Positioning (popover variant) ──
 
+  function viewportHeight(): number {
+    return Math.min(window.innerHeight, visibleHeight?.() ?? Number.POSITIVE_INFINITY);
+  }
+
   function clampToViewport(x: number, y: number): { x: number; y: number } {
     const rect = root.getBoundingClientRect();
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const vh = viewportHeight();
     let nx = x;
     let ny = y;
     if (nx + rect.width > vw - VIEWPORT_MARGIN) nx = vw - VIEWPORT_MARGIN - rect.width;
@@ -114,6 +123,14 @@ export function createPopover(deps: PopoverDeps): Popover {
   }
 
   function placeFallback(): void {
+    if (viewportHeight() < window.innerHeight) {
+      const rect = root.getBoundingClientRect();
+      placeAt(
+        (window.innerWidth - rect.width) / 2,
+        viewportHeight() - VIEWPORT_MARGIN - rect.height,
+      );
+      return;
+    }
     root.style.removeProperty("left");
     root.style.removeProperty("top");
     root.style.left = "50%";
@@ -122,6 +139,14 @@ export function createPopover(deps: PopoverDeps): Popover {
   }
 
   function positionPopover(anchor?: { x: number; y: number }): void {
+    if (visibleHeight) {
+      root.style.setProperty(
+        "--yui-quick-visible-h",
+        `${viewportHeight() - 2 * VIEWPORT_MARGIN}px`,
+      );
+    } else {
+      root.style.removeProperty("--yui-quick-visible-h");
+    }
     // Priority: saved position > cursor anchor > bottom-center fallback.
     const saved = loadSavedPos();
     if (saved) {
@@ -131,7 +156,7 @@ export function createPopover(deps: PopoverDeps): Popover {
     if (anchor) {
       // Open below the anchor, but flip above it when there's no room below (preserving existing behavior).
       const rect = root.getBoundingClientRect();
-      const vh = window.innerHeight;
+      const vh = viewportHeight();
       let y = anchor.y;
       if (y + rect.height > vh - VIEWPORT_MARGIN) y = anchor.y - rect.height;
       placeAt(anchor.x, y);
@@ -277,7 +302,7 @@ export function createPopover(deps: PopoverDeps): Popover {
         // In the window variant, internal close() doesn't remove the panel (always shown) — closing the OS window is the host's job.
         if (!closeWindow) return;
         e.preventDefault();
-        close(); // Run cleanup (key commit, audition abort) first.
+        onClose(); // Run cleanup (key commit, audition abort) first.
         closeWindow();
         return;
       }

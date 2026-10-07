@@ -7,13 +7,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { ToolStatus, Usage } from "../../contract";
-import { createReasoningStore } from "../../io/bridge/reasoning-store";
+import { createReasoningStore } from "../../io/bridge/reasoning/reasoning-store";
 import type {
   ChatHistoryEntry,
   ChatHistoryItem,
   ChatHistoryStorage,
-} from "../../io/chat/chat-history-store";
-import { createChatHistoryStore } from "../../io/chat/chat-history-store";
+} from "../../io/chat/conversation/chat-history-store";
+import { createChatHistoryStore } from "../../io/chat/conversation/chat-history-store";
 import type { Logger } from "../../logger";
 import type { BusEnvelope } from "../core/event-bus";
 import {
@@ -436,7 +436,6 @@ describe("backend_caller — transcript recording", () => {
       source: "timer_scheduler",
       event_name: "proactive.cowork",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {},
     };
     await caller.call(turnOf(env));

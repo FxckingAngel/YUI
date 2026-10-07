@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { InputContext, PreviousTurn, ToolStatus, Usage } from "../../contract";
-import { createReasoningStore } from "../../io/bridge/reasoning-store";
+import { createReasoningStore } from "../../io/bridge/reasoning/reasoning-store";
 import type { Logger } from "../../logger";
 import type { BusEnvelope } from "../core/event-bus";
 import {
@@ -122,6 +122,44 @@ describe("backend_caller — sent history", () => {
           env: expect.not.objectContaining({ active_window_title: expect.anything() }),
         }),
       }),
+    );
+  });
+});
+
+describe("backend_caller — guide turn", () => {
+  it("contextHistory and the turn record hold the key, never the doc body; the transcript entry keeps the key", async () => {
+    const contextHistory = { append: vi.fn() };
+    const appendTurnRecord = vi.fn();
+    const transcript = {
+      append: vi.fn(),
+      entriesAfterLastBoundary: () => [],
+      sessionToken: () => "s",
+    };
+    caller = createBackendCaller({
+      config: CONFIG,
+      renderer: { applyDirective } as never,
+      getApiKey: async () => "k",
+      getFetch: async () => undefined,
+      stream: script.stream,
+      contextHistory,
+      appendTurnRecord,
+      transcript,
+    });
+    const env = {
+      ...userEnv("YUI 조작법 알려줘"),
+      payload: { text: "YUI 조작법 알려줘", guide: "controls" },
+    };
+
+    script.events = [completedEvent({ speech_text: "hi" })];
+    await caller.call(turnOf(env));
+
+    const [, request] = script.spy.mock.calls[0];
+    expect(JSON.stringify(request)).toContain("# Controls");
+    expect(contextHistory.append.mock.calls[0][0].client_context.trigger.guide).toBe("controls");
+    expect(JSON.stringify(contextHistory.append.mock.calls)).not.toContain("# Controls");
+    expect(JSON.stringify(appendTurnRecord.mock.calls)).not.toContain("# Controls");
+    expect(transcript.append).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "user", text: "YUI 조작법 알려줘", guide: "controls" }),
     );
   });
 });
@@ -384,7 +422,6 @@ describe("backend_caller — flat client_context envelope", () => {
       source: "timer_scheduler",
       event_name: "proactive.cowork",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { os_idle_ms: 65_000, gap_ms: 3_900_000 },
     };
   }
@@ -428,7 +465,6 @@ describe("backend_caller — flat client_context envelope", () => {
       source: "timer_scheduler",
       event_name: "schedule.morning",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {},
     };
     await caller.call(turnOf(env));
@@ -445,7 +481,6 @@ describe("backend_caller — flat client_context envelope", () => {
       source: "timer_scheduler",
       event_name: "time_milestone.first_activity",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { name: "first_activity", local_time: "08:12" },
     };
     await caller.call(turnOf(env));
@@ -461,7 +496,6 @@ describe("backend_caller — flat client_context envelope", () => {
       source: "user_input_source",
       event_name: "user.voice_segment_ready",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       dnd_override: true,
       payload: { text: "こんにちは" },
     };

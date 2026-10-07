@@ -9,8 +9,8 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PeekConfig, TapConfig } from "../config/load";
 import { guardrailsFixture } from "../config/load-test-helpers";
+import type { PeekConfig, TapConfig } from "../config/validators/avatar/types";
 import type { AudioSink } from "../io/voice/tts/audio-player";
 import { createSpeechPlayback, type SpeechPlayback } from "../io/voice/tts/speech-playback";
 import type { TtsSynth } from "../io/voice/tts/tts-synth";
@@ -41,7 +41,6 @@ function permissiveGuardrailsConfig(): GuardrailsConfig {
     rate_limit: {
       window_ms: 3_600_000,
       tier2_max: 1000,
-      tier3_max: 1000,
       overall_max: 1000,
       cooldown_ms: 300_000,
     },
@@ -106,7 +105,6 @@ function proactiveEnv(): BusEnvelope {
     source: "os_event_watcher",
     event_name: "proactive.tap_bored",
     ts: NOW + 1,
-    hint_tier: 2,
     dnd_override: false,
     payload: {},
   };

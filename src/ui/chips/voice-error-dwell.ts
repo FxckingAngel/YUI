@@ -1,9 +1,9 @@
 /**
- * How long a voice-turn failure holds the indicator's error state.
+ * How long a voice-turn failure holds the status pill's voice error state.
  *
- * Transient failures clear quickly so the chip does not sit red. A settings-fixable
- * one holds far longer, because its chip carries a fix affordance that must not
- * vanish mid-reach — but it still expires: that chip is registered interactive, so
+ * Transient failures clear quickly so the pill does not sit red. A settings-fixable
+ * one holds far longer, because the pill then carries a fix affordance that must not
+ * vanish mid-reach — but it still expires: that pill is registered interactive, so
  * an unattended one would keep taking OS clicks meant for what sits behind YUI.
  */
 
@@ -18,7 +18,14 @@ interface VoiceErrorDwell {
   dispose(): void;
 }
 
-export function createVoiceErrorDwell(status: VoiceInputStatus): VoiceErrorDwell {
+/**
+ * With a host that owns capture intent the hold ends where the host wants the mic (listening or
+ * idle); without one it ends listening.
+ */
+export function createVoiceErrorDwell(
+  status: VoiceInputStatus,
+  host?: { wanted(): boolean },
+): VoiceErrorDwell {
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   function cancel(): void {
@@ -36,7 +43,9 @@ export function createVoiceErrorDwell(status: VoiceInputStatus): VoiceErrorDwell
       timer = setTimeout(() => {
         timer = null;
         // Only revert what is still the error we posted; the user may have moved on.
-        if (status.get().state === "error") status.set("listening");
+        if (status.get().state === "error") {
+          status.set(host === undefined || host.wanted() ? "listening" : "idle");
+        }
       }, holdMs);
     },
 

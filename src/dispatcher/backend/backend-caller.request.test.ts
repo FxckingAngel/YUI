@@ -7,8 +7,12 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { EndpointsConfig, ToolStatus, Usage } from "../../contract";
-import { createReasoningStore } from "../../io/bridge/reasoning-store";
-import { type ChatHistoryEntry, createChatHistoryStore } from "../../io/chat/chat-history-store";
+import { createReasoningStore } from "../../io/bridge/reasoning/reasoning-store";
+import {
+  type ChatHistoryEntry,
+  type ChatHistoryItem,
+  createChatHistoryStore,
+} from "../../io/chat/conversation/chat-history-store";
 import type { Logger } from "../../logger";
 import type { BusEnvelope } from "../core/event-bus";
 import {
@@ -19,6 +23,7 @@ import {
   deltaEvent,
   makeLogger,
   makeTurnOutput,
+  SIGNAL_ENVELOPE,
   turnOf,
   userEnv,
 } from "../test-helpers";
@@ -204,12 +209,10 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
       source: "timer_scheduler",
       event_name: "schedule.morning",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         cue_id: "morning",
         label: "아침",
         context: "아침 인사 + 오늘 일정 리마인드",
-        local_time: "09:00",
       },
     };
     await caller.call(turnOf(env));
@@ -233,12 +236,10 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
       source: "timer_scheduler",
       event_name: "proactive.cowork",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         cue_id: "cowork",
         label: "코워킹",
         context: "집중 근무 중 따뜻하게 말 걸기",
-        idle_min: 10,
         gap_ms: 3_600_000,
       },
     };
@@ -257,7 +258,6 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
       source: "os_event_watcher",
       event_name: "proactive.touch_chest",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { cue_id: "touch_chest", label: "chest poked" },
     };
     await caller.call(turnOf(env));
@@ -274,7 +274,6 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
       source: "os_event_watcher",
       event_name: "proactive.touch_chest",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { cue_id: "touch_chest", label: "chest poked", context: "poked" },
     };
     await caller.call(turnOf(env));
@@ -298,7 +297,6 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
       source: "os_event_watcher",
       event_name: eventName,
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { cue_id: eventName.split(".")[1], label: "label", context: "context" },
     };
     await caller.call(turnOf(env));
@@ -319,7 +317,6 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
       source: "os_event_watcher",
       event_name: eventName,
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { transition: eventName.replace("proactive.screen_", ""), dwell_min: 45 },
     };
     await caller.call(turnOf(env));
@@ -334,14 +331,16 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
   it("proactive.tap_bored forwards its cue and drained signals", async () => {
     script.events = [completedEvent({ speech_text: "" })];
     const signals = [
-      { items: [{ kind: "reminder", payload: { title: "Stretch" } }, { kind: "alert" }] },
+      {
+        envelope: SIGNAL_ENVELOPE,
+        items: [{ kind: "reminder", payload: { title: "Stretch" } }, { kind: "alert" }],
+      },
     ];
     const env: BusEnvelope = {
       seq_id: 12,
       source: "os_event_watcher",
       event_name: "proactive.tap_bored",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         cue_id: "tap_bored",
         label: "bored poking",
@@ -355,7 +354,9 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
     expect(text).toContain('trigger: proactive "bored poking"');
     expect(text).toContain("cue note: The user wants attention.");
     for (const item of signals[0].items) {
-      expect(text).toContain(`signal: ${JSON.stringify(item)}`);
+      expect(text).toContain(
+        `signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: ${JSON.stringify(item)}`,
+      );
     }
     const userMsg = (request.input as Array<{ role: string; content: unknown }>).find(
       (m) => m.role === "user",
@@ -391,7 +392,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.done",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         tool: "claude-code",
         project: "my-widget",
@@ -423,7 +423,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.done",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         tool: "opencode",
         project: "api",
@@ -448,7 +447,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.catchup",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         count: 2,
         items: [
@@ -504,7 +502,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.done",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { tool: 42 }, // tool is not a string
     };
     await caller.call(turnOf(env));
@@ -526,7 +523,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.needs_input",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         tool: "claude-code",
         project: "my-widget",
@@ -559,7 +555,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.catchup",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         count: 2,
         items: [
@@ -595,7 +590,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.catchup",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         count: 3,
         items: [
@@ -622,7 +616,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.needs_input",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { tool: 42 }, // tool is not a string
     };
     await caller.call(turnOf(env));
@@ -642,7 +635,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.catchup",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { count: 0, items: [] },
     };
     await caller.call(turnOf(env));
@@ -661,7 +653,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.done",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         tool: injected,
         project: "yui",
@@ -696,7 +687,6 @@ describe("backend_caller — agent trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "agent.catchup",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         count: 2,
         items: [
@@ -730,9 +720,13 @@ describe("backend_caller — signals trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "signals.push",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
-        signals: [{ items: [{ kind: "reminder", payload: { foo: "bar" } }, { kind: "alert" }] }],
+        signals: [
+          {
+            envelope: SIGNAL_ENVELOPE,
+            items: [{ kind: "reminder", payload: { foo: "bar" } }, { kind: "alert" }],
+          },
+        ],
         ts: 1_717_000_000_000,
       },
     };
@@ -742,9 +736,11 @@ describe("backend_caller — signals trigger forwarding", () => {
     const lines = text.split("\n");
     expect(lines).toContain("trigger: signals (2 signals)");
     expect(lines).toContain(
-      `signal: ${JSON.stringify({ kind: "reminder", payload: { foo: "bar" } })}`,
+      `signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: ${JSON.stringify({ kind: "reminder", payload: { foo: "bar" } })}`,
     );
-    expect(lines).toContain(`signal: ${JSON.stringify({ kind: "alert" })}`);
+    expect(lines).toContain(
+      `signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: ${JSON.stringify({ kind: "alert" })}`,
+    );
     const userMsg = (request.input as Array<{ role: string; content: unknown }>).find(
       (m) => m.role === "user",
     )!;
@@ -758,8 +754,10 @@ describe("backend_caller — signals trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "signals.push",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
-      payload: { signals: [{ items: [{ kind: "reminder" }] }], ts: 1_717_000_000_000 },
+      payload: {
+        signals: [{ envelope: SIGNAL_ENVELOPE, items: [{ kind: "reminder" }] }],
+        ts: 1_717_000_000_000,
+      },
     };
     await caller.call(turnOf(env));
     const [, request] = script.spy.mock.calls[0];
@@ -775,7 +773,10 @@ describe("backend_caller — signals trigger forwarding", () => {
     );
     const text = clientContextTextOf(items[0]!.content);
     expect(text.split("\n")).toEqual(
-      expect.arrayContaining(["trigger: signals (1 signal)", 'signal: {"kind":"reminder"}']),
+      expect.arrayContaining([
+        "trigger: signals (1 signal)",
+        'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"kind":"reminder"}',
+      ]),
     );
   });
 
@@ -786,10 +787,12 @@ describe("backend_caller — signals trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "signals.catchup",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         count: 2,
-        signals: [{ items: [{ id: 1 }] }, { items: [{ id: 2 }] }],
+        signals: [
+          { envelope: SIGNAL_ENVELOPE, items: [{ id: 1 }] },
+          { envelope: SIGNAL_ENVELOPE, items: [{ id: 2 }] },
+        ],
       },
     };
     await caller.call(turnOf(env));
@@ -797,8 +800,12 @@ describe("backend_caller — signals trigger forwarding", () => {
     const text = clientContextOf(request.input);
     const lines = text.split("\n");
     expect(lines).toContain("trigger: signals (2 signals)");
-    expect(lines).toContain('signal: {"id":1}');
-    expect(lines).toContain('signal: {"id":2}');
+    expect(lines).toContain(
+      'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"id":1}',
+    );
+    expect(lines).toContain(
+      'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"id":2}',
+    );
     const userMsg = (request.input as Array<{ role: string; content: unknown }>).find(
       (m) => m.role === "user",
     )!;
@@ -818,14 +825,15 @@ describe("backend_caller — signals trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "signals.push",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
-      payload: { signals: [{ items: weird }], ts: 1_717_000_000_000 },
+      payload: { signals: [{ envelope: SIGNAL_ENVELOPE, items: weird }], ts: 1_717_000_000_000 },
     };
     await caller.call(turnOf(env));
     const [, request] = script.spy.mock.calls[0];
     const text = clientContextOf(request.input);
     for (const item of weird) {
-      expect(text).toContain(`signal: ${JSON.stringify(item)}`);
+      expect(text).toContain(
+        `signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: ${JSON.stringify(item)}`,
+      );
     }
   });
 
@@ -836,7 +844,6 @@ describe("backend_caller — signals trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "signals.batch",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {
         signals: [
           {
@@ -868,7 +875,6 @@ describe("backend_caller — signals trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "signals.push",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { signals: [{ a: 1 }] },
     };
     await caller.call(turnOf(env));
@@ -885,7 +891,6 @@ describe("backend_caller — signals trigger forwarding", () => {
       source: "timer_scheduler",
       event_name: "signals.push",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: { signals: "not-an-array", ts: 1_717_000_000_000 },
     };
     await caller.call(turnOf(env));
@@ -972,6 +977,38 @@ describe("backend_caller — Chat Completions (CC) mode request shape", () => {
     expect(msgs.some((m) => m.content === "지난 세션 답변")).toBe(false);
   });
 
+  it("replays the guide block before the user entry that carried it, from a transcript reloaded from storage", async () => {
+    script.events = [completedEvent({ speech_text: "" }, "")];
+    let saved: ChatHistoryItem[] = [];
+    const storage = { load: () => saved, save: (items: ChatHistoryItem[]) => (saved = items) };
+    createChatHistoryStore({ storage }).append({
+      role: "user",
+      text: "YUI 조작법 알려줘",
+      ts: 1,
+      guide: "controls",
+    });
+    saved.push({ role: "user", text: "bad key", ts: 2, guide: "nope" } as never);
+    caller = createBackendCaller({
+      config: CC_CONFIG,
+      renderer: { applyDirective } as never,
+      getApiKey: async () => "k",
+      getFetch: async () => undefined,
+      stream: script.stream,
+      turnOutput,
+      transcript: createChatHistoryStore({ storage }),
+    });
+
+    await caller.call(turnOf(userEnv("이어서")));
+
+    const msgs = messagesOf(script.spy.mock.calls[0][1]);
+    const at = msgs.findIndex((m) => m.content === "YUI 조작법 알려줘");
+    expect(at).toBeGreaterThan(0);
+    expect(msgs[at - 1].role).toBe("system");
+    expect(String(msgs[at - 1].content)).toMatch(/^client_context:\nguide:\n[\s\S]*# Controls/);
+    const bad = msgs.findIndex((m) => m.content === "bad key");
+    expect(String(msgs[bad - 1].content)).not.toContain("guide:");
+  });
+
   it("no transcript dep → messages still built with empty transcript (no crash)", async () => {
     script.events = [completedEvent({ speech_text: "" }, "")];
     caller = createBackendCaller({
@@ -1038,7 +1075,6 @@ describe("backend_caller — Chat Completions (CC) mode request shape", () => {
       source: "timer_scheduler",
       event_name: "proactive.cowork",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {},
     };
     await caller.call(turnOf(env));
@@ -1065,7 +1101,6 @@ describe("backend_caller — Chat Completions (CC) mode request shape", () => {
       source: "timer_scheduler",
       event_name: "unknown.something",
       ts: 1_717_000_000_000,
-      hint_tier: 2,
       payload: {},
     };
     await caller.call(turnOf(env));
@@ -1134,10 +1169,13 @@ describe("backend_caller — unconfigured chat backend", () => {
     expect(script.spy).not.toHaveBeenCalled();
   });
 
-  it("closes the TTFT thinking filler it opened", async () => {
+  it("does not start the thinking filler when chat is not configured", async () => {
     turnOutput.hasFiller.mockReturnValue(true);
-    await unconfiguredCaller().call(turnOf(userEnv()));
-    expect(turnOutput.thinkingEnd).toHaveBeenCalledTimes(1);
+
+    const outcome = await unconfiguredCaller().call(turnOf(userEnv()));
+
+    expect(outcome).toBe("not_configured");
+    expect(turnOutput.thinkingStart).not.toHaveBeenCalled();
   });
 
   // The onboarding hint reads the same predicate, so the two surfaces cannot disagree.

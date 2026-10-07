@@ -15,13 +15,14 @@ vi.mock("../tokens.css", () => ({}));
 import { guardrailsFixture } from "../../config/load-test-helpers";
 import { setLocale, t } from "../i18n";
 import { createSurfaces } from "../surfaces/surfaces";
+import { noTool } from "../surfaces/test-helpers";
 
 const readSrc = (name: string): string => readFileSync(resolve(__dirname, name), "utf-8");
 
 function makeSurfaces() {
   const mount = document.createElement("div");
   document.body.appendChild(mount);
-  const s = createSurfaces({ mount });
+  const s = createSurfaces({ tool: noTool, mount });
   return { s, mount };
 }
 
@@ -217,6 +218,80 @@ describe("image attachments — tray chips + onSubmit images", () => {
 
     expect(tray().children.length).toBe(0);
   });
+
+  async function summonOpen(): Promise<void> {
+    s.summonInput();
+    // is-open lands on the next animation frame.
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+
+  it("submit clears the field and the tray in the summoned input", async () => {
+    const seen: Array<[string, string[]]> = [];
+    s.onSubmit((text, images) => seen.push([text, images]));
+    await summonOpen();
+    field().value = "hello";
+    await pasteImages(pngFile("a.png"));
+
+    submit();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0][0]).toBe("hello");
+    expect(seen[0][1][0]).toMatch(/^data:image\/png/);
+    expect(field().value).toBe("");
+    expect(tray().children.length).toBe(0);
+  });
+
+  it("restoreInput puts the text and the attachments back into an open, empty field", async () => {
+    const seen: string[][] = [];
+    s.onSubmit((_text, images) => seen.push(images));
+    await summonOpen();
+    field().value = "hello";
+    await pasteImages(pngFile("a.png"));
+    submit();
+
+    s.restoreInput("hello", seen[0]);
+
+    expect(field().value).toBe("hello");
+    expect(tray().querySelectorAll(".yui-chip")).toHaveLength(1);
+  });
+
+  it("restoreInput leaves a drafted field alone", async () => {
+    await summonOpen();
+    field().value = "new";
+
+    s.restoreInput("hello", ["data:image/png;base64,AAAA"]);
+
+    expect(field().value).toBe("new");
+    expect(tray().querySelector(".yui-chip")).toBeNull();
+  });
+
+  it("restoreInput leaves a closed input alone", () => {
+    s.restoreInput("hello", []);
+
+    expect(field().value).toBe("");
+  });
+
+  it("adding a chip raises the bubble", async () => {
+    Object.defineProperty(form(), "offsetHeight", {
+      configurable: true,
+      get: () => 40 + tray().children.length * 44,
+    });
+    const bubbleBottom = (): number =>
+      Number.parseFloat(
+        (mount.querySelector(".yui-bubble") as HTMLElement).style.getPropertyValue(
+          "--yui-bubble-bottom",
+        ),
+      );
+    s.setInputAnchor(40);
+    s.summonInput();
+    const before = bubbleBottom();
+
+    await pasteImages(pngFile("a.png"));
+    expect(bubbleBottom()).toBe(before + 44);
+
+    (tray().querySelector(".yui-chip__remove") as HTMLButtonElement).click();
+    expect(bubbleBottom()).toBe(before);
+  });
 });
 
 describe("attachment caps — count + per-image size", () => {
@@ -364,40 +439,6 @@ describe("attachment caps — count + per-image size", () => {
   });
 });
 
-describe("setInputEnabled — disable the field while busy", () => {
-  let mount: HTMLElement;
-  let s: ReturnType<typeof createSurfaces>;
-
-  beforeEach(() => {
-    ({ s, mount } = makeSurfaces());
-  });
-
-  afterEach(() => {
-    s.dispose();
-    mount.remove();
-  });
-
-  function field(): HTMLTextAreaElement {
-    return mount.querySelector(".yui-input__field") as HTMLTextAreaElement;
-  }
-  function form(): HTMLElement {
-    return mount.querySelector(".yui-input") as HTMLElement;
-  }
-
-  it("disables the field and marks the form pending when disabled", () => {
-    s.setInputEnabled(false);
-    expect(field().disabled).toBe(true);
-    expect(form().classList.contains("is-pending")).toBe(true);
-  });
-
-  it("re-enables the field and clears pending when enabled", () => {
-    s.setInputEnabled(false);
-    s.setInputEnabled(true);
-    expect(field().disabled).toBe(false);
-    expect(form().classList.contains("is-pending")).toBe(false);
-  });
-});
-
 // A re-summon while open (hotkey re-fire, quick-controls message) must not reset the open session.
 describe("summonInput — no-op while the input is already open", () => {
   let mount: HTMLElement;
@@ -419,18 +460,32 @@ describe("summonInput — no-op while the input is already open", () => {
     return mount.querySelector(".yui-input__field") as HTMLTextAreaElement;
   }
 
-  it("keeps pending, disabled, and the typed text when summoned again while open", async () => {
+  it("keeps the error and the typed text when summoned again while open", async () => {
     s.summonInput();
     // is-open lands on the next animation frame — wait for it so the re-summon hits the guard.
     await new Promise((r) => requestAnimationFrame(r));
     field().value = "안녕";
-    s.setInputEnabled(false);
+    s.showInputError("전송 실패");
 
     s.summonInput();
 
-    expect(form().classList.contains("is-pending")).toBe(true);
-    expect(field().disabled).toBe(true);
+    expect(form().classList.contains("is-error")).toBe(true);
     expect(field().value).toBe("안녕");
+  });
+});
+
+describe("send button — the field keeps focus", () => {
+  it("mousedown on the send button keeps the field's focus", () => {
+    const { s, mount } = makeSurfaces();
+    const send = mount.querySelector(".yui-input__send") as HTMLButtonElement;
+
+    const notPrevented = send.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+    );
+
+    expect(notPrevented).toBe(false);
+    s.dispose();
+    mount.remove();
   });
 });
 
@@ -554,7 +609,7 @@ describe("surfaces — i18n chrome", () => {
     setLocale("en");
     mount = document.createElement("div");
     document.body.appendChild(mount);
-    s = createSurfaces({ mount });
+    s = createSurfaces({ tool: noTool, mount });
   });
 
   afterEach(() => {
@@ -811,14 +866,13 @@ describe("input row pop-out button", () => {
     mount = document.createElement("div");
     document.body.appendChild(mount);
     onPop = vi.fn<() => void>();
-    s = createSurfaces({ mount, onPop });
+    s = createSurfaces({ tool: noTool, mount, onPop });
   });
 
   afterEach(() => {
     s.dispose();
     mount.remove();
     setLocale("en");
-    delete (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
   const popBtn = (): HTMLButtonElement =>
@@ -837,27 +891,6 @@ describe("input row pop-out button", () => {
   it("reports the pop request on click", () => {
     popBtn().click();
     expect(onPop).toHaveBeenCalledTimes(1);
-  });
-
-  it("stays hidden outside Tauri, exactly like the bubble's pop button", () => {
-    const bubblePop = mount.querySelector(".yui-bubble__pop") as HTMLButtonElement;
-    expect(popBtn().hidden).toBe(true);
-    expect(popBtn().hidden).toBe(bubblePop.hidden);
-  });
-
-  it("shows in the Tauri runtime, where a second window exists to pop into", () => {
-    (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
-    const other = document.createElement("div");
-    document.body.appendChild(other);
-    const s2 = createSurfaces({ mount: other });
-
-    const rowPop = other.querySelector(".yui-input__pop") as HTMLButtonElement;
-    const bubblePop = other.querySelector(".yui-bubble__pop") as HTMLButtonElement;
-    expect(rowPop.hidden).toBe(false);
-    expect(rowPop.hidden).toBe(bubblePop.hidden);
-
-    s2.dispose();
-    other.remove();
   });
 
   it("re-applies its label on locale change (surfaces is not re-mounted)", () => {
@@ -1000,5 +1033,76 @@ describe("multiline field — Enter, IME safety, auto-grow", () => {
     const after = Number.parseFloat(bubble().style.getPropertyValue("--yui-bubble-bottom"));
 
     expect(after - before).toBe(60);
+  });
+});
+
+describe("persistent input — always open, sends by button", () => {
+  let mount: HTMLElement;
+  let s: ReturnType<typeof createSurfaces>;
+
+  beforeEach(() => {
+    mount = document.createElement("div");
+    document.body.appendChild(mount);
+    s = createSurfaces({ tool: noTool, mount, persistentInput: true });
+  });
+
+  afterEach(() => {
+    s.dispose();
+    mount.remove();
+  });
+
+  function form(): HTMLFormElement {
+    return mount.querySelector(".yui-input") as HTMLFormElement;
+  }
+  function field(): HTMLTextAreaElement {
+    return mount.querySelector(".yui-input__field") as HTMLTextAreaElement;
+  }
+  function bubble(): HTMLElement {
+    return mount.querySelector(".yui-bubble") as HTMLElement;
+  }
+
+  it("is open at construction without taking focus", () => {
+    expect(form().hidden).toBe(false);
+    expect(form().classList.contains("is-open")).toBe(true);
+    expect(document.activeElement).not.toBe(field());
+    expect(s.isInputOpen()).toBe(true);
+  });
+
+  it("leaves Enter to the field as a newline", () => {
+    const onSubmit = vi.fn();
+    s.onSubmit(onSubmit);
+    field().value = "hello";
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    field().dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("sends the trimmed text on submit and empties the field", () => {
+    const onSubmit = vi.fn();
+    s.onSubmit(onSubmit);
+    field().value = "  hello  ";
+
+    form().dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(onSubmit).toHaveBeenCalledWith("hello", []);
+    expect(field().value).toBe("");
+  });
+
+  it("keeps the typed text and stays open on Escape", () => {
+    field().value = "draft";
+
+    field().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+
+    expect(field().value).toBe("draft");
+    expect(form().classList.contains("is-open")).toBe(true);
+  });
+
+  it("lifts the bubble above the input from the start", () => {
+    expect(bubble().classList.contains("is-above-input")).toBe(true);
   });
 });

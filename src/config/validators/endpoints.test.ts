@@ -42,6 +42,8 @@ describe("validateEndpoints — happy path", () => {
         chat_model: "natsume",
         chat_instructions: "use generate_express",
         chat_api: "responses",
+        stt_model: "whisper-large-v3-turbo",
+        tts_provider: "openai",
         tts_model: "irodori-tts",
         tts_speaker: "ナツメ",
         chat_model_context_window: 128000,
@@ -51,6 +53,8 @@ describe("validateEndpoints — happy path", () => {
     expect(out.chat_model).toBe("natsume");
     expect(out.chat_instructions).toBe("use generate_express");
     expect(out.chat_api).toBe("responses");
+    expect(out.stt_model).toBe("whisper-large-v3-turbo");
+    expect(out.tts_provider).toBe("openai");
     expect(out.tts_model).toBe("irodori-tts");
     expect(out.tts_speaker).toBe("ナツメ");
     expect(out.chat_model_context_window).toBe(128000);
@@ -116,6 +120,12 @@ describe("validateEndpoints — base urls", () => {
     );
   });
 
+  it("rejects a chat_base_url the URL parser cannot read", () => {
+    for (const v of ["http://", "http://a b/v1", "http://[x/v1", "https://:9/v1"]) {
+      expectIssue(baseRaw({ chat_base_url: v }), "chat_base_url must be an http(s) URL");
+    }
+  });
+
   it("accepts a missing stt_base_url as unset", () => {
     expect(validateEndpoints(FILE, baseRaw({ stt_base_url: undefined })).stt_base_url).toBe("");
   });
@@ -144,7 +154,27 @@ describe("validateEndpoints — chat_model / chat_instructions / chat_api", () =
   });
 });
 
-describe("validateEndpoints — tts_model / tts_speaker", () => {
+describe("validateEndpoints — tts_provider", () => {
+  it("accepts every provider, fish included", () => {
+    for (const p of ["irodori", "openai", "fish"]) {
+      expect(validateEndpoints(FILE, baseRaw({ tts_provider: p })).tts_provider).toBe(p);
+    }
+  });
+
+  it("rejects an unknown tts_provider", () => {
+    expectIssue(baseRaw({ tts_provider: "azure" }), "tts_provider must be");
+  });
+
+  it("omits tts_provider when unset", () => {
+    expect(validateEndpoints(FILE, baseRaw()).tts_provider).toBeUndefined();
+  });
+});
+
+describe("validateEndpoints — stt_model / tts_model / tts_speaker", () => {
+  it("rejects a blank stt_model", () => {
+    expectIssue(baseRaw({ stt_model: "  " }), "stt_model must be a non-blank string");
+  });
+
   it("rejects an empty tts_model", () => {
     expectIssue(baseRaw({ tts_model: "" }), "tts_model must be a non-blank string");
   });
@@ -158,8 +188,9 @@ describe("validateEndpoints — tts_model / tts_speaker", () => {
     expect(out.tts_speaker).toBe("ムラサメ");
   });
 
-  it("omits tts_model / tts_speaker when unset", () => {
+  it("omits stt_model / tts_model / tts_speaker when unset", () => {
     const out = validateEndpoints(FILE, baseRaw());
+    expect(out.stt_model).toBeUndefined();
     expect(out.tts_model).toBeUndefined();
     expect(out.tts_speaker).toBeUndefined();
   });

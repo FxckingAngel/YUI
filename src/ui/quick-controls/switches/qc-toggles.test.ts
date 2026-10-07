@@ -1,0 +1,528 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type { AvatarOption } from "../../../config/validators/avatar/types";
+import type { createVrmSelection } from "../../../io/assets/vrm-selection";
+import type {
+  createSpeakerSelection,
+  SpeakerOption,
+} from "../../../io/voice/voices/speaker-selection";
+import { createLipsyncSettings } from "../../../settings/avatar/lipsync-settings";
+import { createAgentNotifySettings } from "../../../settings/backend/agent-notify-settings";
+import { createAgentSettings } from "../../../settings/backend/agent-settings";
+import { createEndpointsSettings } from "../../../settings/backend/endpoints-settings";
+import { createProactiveSettings } from "../../../settings/cues/proactive-settings";
+import { createScheduleSettings } from "../../../settings/cues/schedule-settings";
+import { createMessageWindowSettings } from "../../../settings/panels/message-window-settings";
+import { createFlagSettings } from "../../../settings/persisted-store";
+import { createVadSettings } from "../../../settings/voice/vad-settings";
+import { setLocale, t } from "../../i18n";
+import { createQuickControls } from "../quick-controls";
+import {
+  defaultQcArgs,
+  inMemoryAgentStorage,
+  makeSpeakerSelection,
+  makeVrmSelection,
+} from "../test-helpers";
+
+describe("createQuickControls — toggles", () => {
+  let mount: HTMLElement;
+  let onGainPreview: Mock<(mouthOpen: number) => void>;
+  let onGainPreviewEnd: Mock<() => void>;
+  let lipsync: ReturnType<typeof createLipsyncSettings>;
+  let agentSettings: ReturnType<typeof createAgentSettings>;
+  let endpointsSettings: ReturnType<typeof createEndpointsSettings>;
+  let proactiveSettings: ReturnType<typeof createProactiveSettings>;
+  let scheduleSettings: ReturnType<typeof createScheduleSettings>;
+  let onPopOut: Mock<() => void>;
+  let vrmSelection: ReturnType<typeof createVrmSelection>;
+  let swapVrm: Mock<(option: AvatarOption) => Promise<void>>;
+  let importVrm: Mock<() => Promise<void>>;
+  let removeUserVrm: Mock<(id: string) => Promise<void>>;
+  let speakerSelection: ReturnType<typeof createSpeakerSelection>;
+  let swapSpeaker: Mock<(option: SpeakerOption) => Promise<void>>;
+  let refreshSpeaker: Mock<(option: SpeakerOption) => Promise<void>>;
+  let pickVoiceImport: Mock<() => Promise<{ srcPath: string; seedName: string } | null>>;
+  let commitVoiceImport: Mock<(srcPath: string, name: string) => Promise<void>>;
+  let removeVoice: Mock<(id: string) => Promise<void>>;
+
+  beforeEach(() => {
+    // Make rAF synchronous so open() → is-open transition happens immediately in tests
+    let rafId = 0;
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return ++rafId;
+    });
+    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => {});
+
+    mount = document.createElement("div");
+    document.body.appendChild(mount);
+
+    onGainPreview = vi.fn<(mouthOpen: number) => void>();
+    onGainPreviewEnd = vi.fn<() => void>();
+    lipsync = createLipsyncSettings();
+    agentSettings = createAgentSettings({ storage: inMemoryAgentStorage() });
+    endpointsSettings = createEndpointsSettings();
+    proactiveSettings = createProactiveSettings();
+    scheduleSettings = createScheduleSettings();
+    onPopOut = vi.fn<() => void>();
+    vrmSelection = makeVrmSelection();
+    // default fake: commit the store on success (mirrors the real settings-window impl)
+    swapVrm = vi.fn<(option: AvatarOption) => Promise<void>>(async (option) => {
+      vrmSelection.select(option.id);
+    });
+    importVrm = vi.fn<() => Promise<void>>(async () => {});
+    removeUserVrm = vi.fn<(id: string) => Promise<void>>(async () => {});
+    speakerSelection = makeSpeakerSelection();
+    // default fake: commit the store on success (mirrors the real settings-window impl)
+    swapSpeaker = vi.fn<(option: SpeakerOption) => Promise<void>>(async (option) => {
+      speakerSelection.select(option.id);
+    });
+    // refresh is server-side only — default fake resolves without touching the store.
+    refreshSpeaker = vi.fn<(option: SpeakerOption) => Promise<void>>(async () => {});
+    pickVoiceImport = vi.fn<() => Promise<{ srcPath: string; seedName: string } | null>>(
+      async () => null,
+    );
+    commitVoiceImport = vi.fn<(srcPath: string, name: string) => Promise<void>>(async () => {});
+    removeVoice = vi.fn<(id: string) => Promise<void>>(async () => {});
+    try {
+      globalThis.localStorage?.clear();
+    } catch {
+      /* Ignore environments without localStorage */
+    }
+    // Existing assertions pin Korean copy/selectors; render the panel in ko.
+    setLocale("ko");
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+  });
+
+  function buildQc(extra?: Partial<Parameters<typeof createQuickControls>[0]>) {
+    return createQuickControls({
+      ...defaultQcArgs(mount),
+      lipsync,
+      onGainPreview,
+      onGainPreviewEnd,
+      agentSettings,
+      endpointsSettings,
+      proactiveSettings,
+      scheduleSettings,
+      onPopOut,
+      vrmSelection,
+      swapVrm,
+      importVrm,
+      removeUserVrm,
+      speakerSelection,
+      swapSpeaker,
+      refreshSpeaker,
+      pickVoiceImport,
+      commitVoiceImport,
+      removeVoice,
+      ...extra,
+    });
+  }
+
+  // ── Idle power-saving toggle row (General tab) ──────────────────────────
+  // Unlike the gated rows below, idleThrottleSettings is part of defaultQcArgs, so this row
+  // always renders — it has no "absent" case to check.
+
+  it("renders the idle-throttle toggle row in the General tab, ON by default", () => {
+    const qc = buildQc();
+    qc.open();
+
+    const idleSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-idle-throttle-switch");
+    expect(idleSwitch).not.toBeNull();
+    expect(idleSwitch!.getAttribute("aria-checked")).toBe("true");
+    expect(idleSwitch!.getAttribute("role")).toBe("switch");
+    expect(idleSwitch!.getAttribute("aria-label")).toBe("유휴 시 절전");
+
+    const row = idleSwitch!.closest(".yui-row")!;
+    expect(row.querySelector(".yui-row__label")!.textContent).toContain("유휴 시 절전");
+    expect(row.querySelector(".yui-row__sub")!.textContent).toContain(
+      "캐릭터가 가만히 있을 때 프레임을 낮춰 전력을 아낍니다",
+    );
+
+    qc.dispose();
+  });
+
+  // ── On/off toggle rows sharing one render/click/external scaffold ────────
+
+  const toggleRows = [
+    {
+      name: "idle-throttle",
+      selector: ".yui-idle-throttle-switch",
+      ariaLabel: "유휴 시 절전",
+      initialEnabled: true,
+      gated: false,
+      build: () => {
+        const settings = createFlagSettings(true);
+        return { settings, qc: buildQc({ idleThrottleSettings: settings }) };
+      },
+    },
+    {
+      name: "gaze",
+      selector: ".yui-gaze-switch",
+      ariaLabel: "커서 따라보기",
+      initialEnabled: true,
+      gated: true,
+      build: () => {
+        const settings = createFlagSettings(true);
+        return { settings, qc: buildQc({ gazeSettings: settings }) };
+      },
+    },
+    {
+      name: "climb",
+      selector: ".yui-climb-switch",
+      ariaLabel: "창 오르기",
+      initialEnabled: true,
+      gated: true,
+      build: () => {
+        const settings = createFlagSettings(true);
+        return { settings, qc: buildQc({ climbSettings: settings }) };
+      },
+    },
+    {
+      name: "agentNotify",
+      selector: ".yui-agentnotify-switch",
+      ariaLabel: "에이전트 알림",
+      initialEnabled: false,
+      gated: true,
+      build: () => {
+        const settings = createAgentNotifySettings();
+        return { settings, qc: buildQc({ agentNotifySettings: settings }) };
+      },
+    },
+  ];
+
+  it.each(
+    toggleRows.filter((row) => row.gated),
+  )("renders the $name toggle row only when its settings are provided", ({
+    selector,
+    ariaLabel,
+    initialEnabled,
+    build,
+  }) => {
+    const withoutRow = buildQc();
+    withoutRow.open();
+    expect(withoutRow.el.querySelector(selector)).toBeNull();
+    withoutRow.dispose();
+
+    const { qc } = build();
+    qc.open();
+    const toggle = qc.el.querySelector<HTMLButtonElement>(selector);
+    expect(toggle).not.toBeNull();
+    expect(toggle!.getAttribute("aria-checked")).toBe(String(initialEnabled));
+    expect(toggle!.getAttribute("role")).toBe("switch");
+    expect(toggle!.getAttribute("aria-label")).toBe(ariaLabel);
+
+    const row = toggle!.closest(".yui-row")!;
+    expect(row.querySelector(".yui-row__label")!.textContent).toContain(ariaLabel);
+    qc.dispose();
+  });
+
+  it.each(toggleRows)("clicking the $name switch toggles setEnabled", ({
+    selector,
+    initialEnabled,
+    build,
+  }) => {
+    const { settings, qc } = build();
+    qc.open();
+
+    const toggle = qc.el.querySelector<HTMLButtonElement>(selector)!;
+    expect(settings.get().enabled).toBe(initialEnabled);
+
+    toggle.click();
+    expect(settings.get().enabled).toBe(!initialEnabled);
+    expect(toggle.getAttribute("aria-checked")).toBe(String(!initialEnabled));
+
+    toggle.click();
+    expect(settings.get().enabled).toBe(initialEnabled);
+    expect(toggle.getAttribute("aria-checked")).toBe(String(initialEnabled));
+
+    qc.dispose();
+  });
+
+  it.each(toggleRows)("external $name setEnabled reflects on the switch while open", ({
+    selector,
+    initialEnabled,
+    build,
+  }) => {
+    const { settings, qc } = build();
+    qc.open();
+
+    const toggle = qc.el.querySelector<HTMLButtonElement>(selector)!;
+    settings.setEnabled(!initialEnabled);
+    expect(toggle.getAttribute("aria-checked")).toBe(String(!initialEnabled));
+
+    settings.setEnabled(initialEnabled);
+    expect(toggle.getAttribute("aria-checked")).toBe(String(initialEnabled));
+
+    qc.dispose();
+  });
+
+  // ── Falling toggle row (General tab) ─────────────────────────────────────
+
+  it("renders the fall toggle row only when fallSettings is provided, ON by default", () => {
+    const withoutFall = buildQc();
+    withoutFall.open();
+    expect(withoutFall.el.querySelector(".yui-fall-switch")).toBeNull();
+    withoutFall.dispose();
+
+    const qc = buildQc({ fallSettings: createFlagSettings(true) });
+    qc.open();
+    const fallSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-fall-switch");
+    expect(fallSwitch).not.toBeNull();
+    expect(fallSwitch!.getAttribute("aria-checked")).toBe("true");
+    expect(fallSwitch!.getAttribute("role")).toBe("switch");
+    expect(fallSwitch!.getAttribute("aria-label")).toBe(t("fall.aria"));
+
+    const row = fallSwitch!.closest(".yui-row")!;
+    expect(row.querySelector(".yui-row__label")!.textContent).toContain(t("fall.label"));
+    qc.dispose();
+  });
+
+  it("clicking the fall switch toggles fallSettings.setEnabled and reflects external changes", () => {
+    const fallSettings = createFlagSettings(true);
+    const qc = buildQc({ fallSettings });
+    qc.open();
+
+    const fallSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-fall-switch")!;
+    fallSwitch.click();
+    expect(fallSettings.get().enabled).toBe(false);
+    expect(fallSwitch.getAttribute("aria-checked")).toBe("false");
+
+    fallSettings.setEnabled(true);
+    expect(fallSwitch.getAttribute("aria-checked")).toBe("true");
+
+    qc.dispose();
+  });
+
+  // ── TTS voice output toggle ──────────────────────────────────────────────────
+
+  it("clicking the TTS switch toggles ttsSettings.setEnabled", () => {
+    const ttsSettings = createFlagSettings(true);
+    const qc = buildQc({ ttsSettings });
+    qc.open();
+
+    const ttsSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-tts-switch")!;
+    expect(ttsSettings.get().enabled).toBe(true);
+
+    ttsSwitch.click();
+    expect(ttsSettings.get().enabled).toBe(false);
+    expect(ttsSwitch.getAttribute("aria-checked")).toBe("false");
+
+    ttsSwitch.click();
+    expect(ttsSettings.get().enabled).toBe(true);
+    expect(ttsSwitch.getAttribute("aria-checked")).toBe("true");
+
+    qc.dispose();
+  });
+
+  it("external ttsSettings.setEnabled reflects on the switch while open", () => {
+    const ttsSettings = createFlagSettings(true);
+    const qc = buildQc({ ttsSettings });
+    qc.open();
+
+    const ttsSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-tts-switch")!;
+    ttsSettings.setEnabled(false);
+    expect(ttsSwitch.getAttribute("aria-checked")).toBe("false");
+
+    ttsSettings.setEnabled(true);
+    expect(ttsSwitch.getAttribute("aria-checked")).toBe("true");
+
+    qc.dispose();
+  });
+
+  it("renders the TTS switch with default aria-checked and clicking is a no-op when ttsSettings is absent", () => {
+    const qc = buildQc();
+    qc.open();
+
+    const ttsSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-tts-switch");
+    expect(ttsSwitch).not.toBeNull();
+    expect(ttsSwitch!.getAttribute("aria-checked")).toBe("true");
+    expect(ttsSwitch!.getAttribute("role")).toBe("switch");
+
+    // No ttsSettings injected — clicking must not throw and aria-checked stays put.
+    expect(() => ttsSwitch!.click()).not.toThrow();
+    expect(ttsSwitch!.getAttribute("aria-checked")).toBe("true");
+
+    qc.dispose();
+  });
+
+  // ── Barge-in toggle ─────────────────────────────────────────────────────────
+
+  it("clicking the barge-in switch toggles vad.setBargeIn", () => {
+    const vad = createVadSettings();
+    const qc = buildQc({ vad });
+    qc.open();
+
+    const bargeInSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-bargein-switch")!;
+    expect(vad.get().bargeIn).toBe(true);
+
+    bargeInSwitch.click();
+    expect(vad.get().bargeIn).toBe(false);
+    expect(bargeInSwitch.getAttribute("aria-checked")).toBe("false");
+
+    bargeInSwitch.click();
+    expect(vad.get().bargeIn).toBe(true);
+    expect(bargeInSwitch.getAttribute("aria-checked")).toBe("true");
+
+    qc.dispose();
+  });
+
+  it("external vad.setBargeIn reflects on the switch while open", () => {
+    const vad = createVadSettings();
+    const qc = buildQc({ vad });
+    qc.open();
+
+    const bargeInSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-bargein-switch")!;
+    vad.setBargeIn(false);
+    expect(bargeInSwitch.getAttribute("aria-checked")).toBe("false");
+
+    vad.setBargeIn(true);
+    expect(bargeInSwitch.getAttribute("aria-checked")).toBe("true");
+
+    qc.dispose();
+  });
+
+  it("renders the barge-in switch with default aria-checked reflecting vadSettings.bargeIn", () => {
+    const qc = buildQc();
+    qc.open();
+
+    const bargeInSwitch = qc.el.querySelector<HTMLButtonElement>(".yui-bargein-switch");
+    expect(bargeInSwitch).not.toBeNull();
+    expect(bargeInSwitch!.getAttribute("aria-checked")).toBe("true");
+    expect(bargeInSwitch!.getAttribute("role")).toBe("switch");
+
+    qc.dispose();
+  });
+});
+
+// The row moves the persisted mode the pet window reads; the browser dev build has no
+// second window to move into, so it does not render there at all.
+describe("createQuickControls — message-window row", () => {
+  let mount: HTMLElement;
+
+  beforeEach(() => {
+    mount = document.createElement("div");
+    document.body.appendChild(mount);
+    (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    delete (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("renders in the Input tab and flips the stored mode", () => {
+    const messageWindowSettings = createMessageWindowSettings();
+    const qc = createQuickControls({ ...defaultQcArgs(mount), messageWindowSettings });
+    qc.open();
+
+    const sw = qc.el.querySelector<HTMLButtonElement>(".yui-message-window-switch")!;
+    expect(qc.el.querySelector<HTMLElement>("#yui-panel-input")!.contains(sw)).toBe(true);
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+
+    sw.click();
+    expect(messageWindowSettings.get().mode).toBe("popped");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+
+    sw.click();
+    expect(messageWindowSettings.get().mode).toBe("docked");
+
+    qc.dispose();
+  });
+
+  it("reflects an external mode change while open", () => {
+    const messageWindowSettings = createMessageWindowSettings();
+    const qc = createQuickControls({ ...defaultQcArgs(mount), messageWindowSettings });
+    qc.open();
+
+    messageWindowSettings.setMode("popped");
+    expect(
+      qc.el
+        .querySelector<HTMLButtonElement>(".yui-message-window-switch")!
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    qc.dispose();
+  });
+
+  it("is absent when no store is injected", () => {
+    const qc = createQuickControls(defaultQcArgs(mount));
+    qc.open();
+    expect(qc.el.querySelector(".yui-message-window-switch")).toBeNull();
+    qc.dispose();
+  });
+
+  it("is absent outside Tauri, where there is no window to pop out", () => {
+    delete (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    const qc = createQuickControls({
+      ...defaultQcArgs(mount),
+      messageWindowSettings: createMessageWindowSettings(),
+    });
+    qc.open();
+    expect(qc.el.querySelector(".yui-message-window-switch")).toBeNull();
+    qc.dispose();
+  });
+});
+
+describe("createQuickControls — keep bubble until dismissed switch", () => {
+  let mount: HTMLElement;
+
+  beforeEach(() => {
+    let rafId = 0;
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return ++rafId;
+    });
+    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => {});
+    mount = document.createElement("div");
+    document.body.appendChild(mount);
+    setLocale("en");
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+  });
+
+  it("is absent when no store is injected", () => {
+    const qc = createQuickControls(defaultQcArgs(mount));
+    qc.open();
+    expect(qc.el.querySelector(".yui-bubble-persist-switch")).toBeNull();
+    qc.dispose();
+  });
+
+  it("renders in the Input tab, off by default, and toggles the store", () => {
+    const bubblePersistSettings = createFlagSettings(false);
+    const qc = createQuickControls({ ...defaultQcArgs(mount), bubblePersistSettings });
+    qc.open();
+
+    const sw = qc.el.querySelector<HTMLButtonElement>(".yui-bubble-persist-switch")!;
+    expect(qc.el.querySelector<HTMLElement>("#yui-panel-input")!.contains(sw)).toBe(true);
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+
+    sw.click();
+    expect(bubblePersistSettings.get().enabled).toBe(true);
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+
+    qc.dispose();
+  });
+
+  it("reflects an external store change while open", () => {
+    const bubblePersistSettings = createFlagSettings(false);
+    const qc = createQuickControls({ ...defaultQcArgs(mount), bubblePersistSettings });
+    qc.open();
+
+    bubblePersistSettings.setEnabled(true);
+    expect(
+      qc.el
+        .querySelector<HTMLButtonElement>(".yui-bubble-persist-switch")!
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    qc.dispose();
+  });
+});

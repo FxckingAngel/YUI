@@ -14,7 +14,7 @@ A feature lives in the shared consumer; a transport's wiring only turns that tra
 
 ## Development work
 
-Any code change — feature · bugfix · refactor · UI · schema · or any chore beyond a trivial single-file edit — load the **`yui-dev-workflow`** skill first. It carries the mandatory work rules (worktree → PR, tests, English tracker), delegation rules and the review/verification gates, and the client-side anti-patterns.
+Any code change — feature · bugfix · refactor · UI · schema · or any chore beyond a trivial single-file edit — follows [`CONTRIBUTING.md`](CONTRIBUTING.md). It carries the mandatory work rules (worktree → PR, tests, English tracker) and the client-side anti-patterns.
 
 ## Tracker & commit conventions
 
@@ -42,12 +42,11 @@ Code is the source of truth for client behavior, TS contract shapes, and config 
 Read these when the trigger applies; they are not loaded by default.
 
 - **Code location / orientation** → `docs/agent-guide/project-structure.md`
-- **Standalone Mods (independent MCP servers)** → `Mods/README.md` — not part of the app runtime; own Python/uv toolchain + `mods` CI job
+- **Standalone Mods (independent MCP servers)** → `Mods/README.md` — not part of the app runtime; own Python/uv toolchain + `mods` and `mods-lint` CI jobs
 - **Adding a Mod / Mods CI rules** → `docs/agent-guide/mods.md` — per-mod uv-project layout, router registration, the two-loop CI, ruff
 - **Agent desire system (Hermes-side)** → `integrations/hermes/desire/README.md`
 - **Connecting Hermes Agent as the backend (Responses mode, dev proxy, auth)** → `integrations/hermes/README.md`
-- **Handing a `ready-for-agent` issue to the backend agent for headless implementation** → `integrations/hermes/skills/yui-dispatch/SKILL.md`
-- **Setting up or speaking the daily briefing (any backend)** → `integrations/skills/yui-daily-briefing/SKILL.md`
+- **Setting up or speaking the daily briefing (any backend agent)** → `integrations/skills/yui-daily-briefing/SKILL.md`
 - **Runtime evidence for a yui platform plugin change (live Hermes gateway, throwaway profile)** → `integrations/hermes/platform/yui/skills/yui-platform-smoke-test/SKILL.md`
 - **IO or backend work (chat/STT/TTS/broker)** → `docs/agent-guide/backend-integration.md`
 - **Wiring an external coding-agent's lifecycle hooks** → `docs/agent-guide/agent-completion-hooks.md`

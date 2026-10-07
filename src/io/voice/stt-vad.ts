@@ -13,6 +13,7 @@ import { MicVAD } from "@ricky0123/vad-web";
 import type { EndpointsConfig } from "../../contract";
 import { createLogger } from "../../logger";
 import { createDeadlineSignal, untilAborted } from "./deadline";
+import type { MicErrorCode } from "./mic-error";
 
 const log = createLogger("stt-vad");
 
@@ -21,6 +22,15 @@ export type VoiceInputState = "idle" | "listening" | "asr" | "fired" | "error";
 type SttVadRuntimeState = Exclude<VoiceInputState, "idle">;
 
 const VAD_ASSET_PATH = "/vad/";
+
+// The constraints @ricky0123/vad-web asks getUserMedia for by default.
+const MIC_CONSTRAINTS: MediaStreamConstraints = {
+  audio: { channelCount: 1, echoCancellation: true, autoGainControl: true, noiseSuppression: true },
+};
+
+function releaseTracks(stream: MediaStream): void {
+  for (const track of stream.getTracks()) track.stop();
+}
 
 // Deadline so a hung STT request settles instead of silently discarding the captured utterance forever.
 // Magnitude mirrors tts-synth's TTS_SYNTH_TIMEOUT_MS.
@@ -49,9 +59,12 @@ export interface SttVadOptions {
 }
 
 export interface SttVad {
-  /** Load VAD and start listening (idempotent). */
+  /**
+   * Load VAD and start listening (idempotent). Resolves once capture runs, or once a stop() or
+   * dispose() that landed first has cancelled it; rejects with the failure's detail as the message.
+   */
   start(): Promise<void>;
-  /** Pause listening without releasing resources. */
+  /** Pause listening and release the mic, keeping the loaded model; a transcription still in flight is dropped. */
   stop(): void;
   /** Destroy VAD instance and release ONNX session. */
   dispose(): Promise<void>;
@@ -96,19 +109,18 @@ function encodeWav(samples: Float32Array): Blob {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-/** Map a start() failure to a human-readable, cause-distinguishable detail. */
+const MIC_ERROR_BY_NAME: Record<string, MicErrorCode> = {
+  NotAllowedError: "mic_denied",
+  SecurityError: "mic_denied",
+  NotFoundError: "no_mic",
+  DevicesNotFoundError: "no_mic",
+  NotReadableError: "mic_unavailable",
+};
+
+/** Map a start() failure to a stable cause code, or to its message when it is not a mic cause. */
 function describeStartError(err: unknown): string {
-  const name = err instanceof DOMException ? err.name : "";
-  switch (name) {
-    case "NotAllowedError":
-    case "SecurityError":
-      return "Microphone permission denied";
-    case "NotFoundError":
-    case "DevicesNotFoundError":
-      return "No microphone device found";
-    case "NotReadableError":
-      return "Microphone is in use by another app";
-  }
+  const code = err instanceof DOMException ? MIC_ERROR_BY_NAME[err.name] : undefined;
+  if (code) return code;
   const message = err instanceof Error ? err.message : "";
   return message ? `Voice init failed: ${message}` : "Voice init failed";
 }
@@ -118,14 +130,18 @@ export function createSttVad(options: SttVadOptions): SttVad {
   const fetchImpl = options.fetch ?? globalThis.fetch;
 
   let vad: Awaited<ReturnType<typeof MicVAD.new>> | null = null;
-  let loading = false;
   let startPromise: Promise<void> | null = null;
-  // Set by stop()/dispose() when they land during an in-flight load, so the load
-  // can apply the requested outcome once MicVAD.new settles instead of racing it.
-  let stopRequested = false;
-  let disposeRequested = false;
+  // The stream acquired for the VAD's next getStream/resumeStream call.
+  let handoff: MediaStream | null = null;
+  let capturing = false;
+  // The latest start()/stop() outcome the caller asked for; a load or capture in flight applies it when it lands.
+  let wanted = false;
+  // Bumped by stop() and dispose(): a transcription that began under an older value is dropped.
+  let generation = 0;
 
   async function onSpeechEnd(audio: Float32Array): Promise<void> {
+    const segmentGeneration = generation;
+    const stale = (): boolean => segmentGeneration !== generation;
     onState?.("asr");
     const wav = encodeWav(audio);
     const form = new FormData();
@@ -135,21 +151,26 @@ export function createSttVad(options: SttVadOptions): SttVad {
     try {
       // Bearer only — never set Content-Type here: FormData needs the browser-set multipart boundary.
       const key = (await getApiKey?.())?.trim() || undefined;
-      const res = await fetchImpl(`${config().stt_base_url}/audio/transcriptions`, {
+      const cfg = config();
+      if (cfg.stt_model) form.append("model", cfg.stt_model);
+      const res = await fetchImpl(`${cfg.stt_base_url}/audio/transcriptions`, {
         method: "POST",
         body: form,
         headers: key ? { Authorization: `Bearer ${key}` } : undefined,
         signal: deadline.signal,
       });
+      if (stale()) return;
       if (!res.ok) {
         log.warn("stt_request_failed", { status: res.status });
         onState?.("error", `HTTP ${res.status}`);
         return;
       }
       const data = (await untilAborted(res.json(), deadline.signal)) as { text: string };
+      if (stale()) return;
       onVoiceSegment(data.text);
       onState?.("fired");
     } catch (err) {
+      if (stale()) return;
       // The Tauri transport rejects with its own cancel error; the deadline's reason names the timeout.
       const cause = deadline.signal.aborted ? deadline.signal.reason : err;
       log.warn("stt_error", { error: String(cause) });
@@ -160,68 +181,102 @@ export function createSttVad(options: SttVadOptions): SttVad {
     }
   }
 
-  function load(): Promise<void> {
-    loading = true;
-    stopRequested = false;
-    disposeRequested = false;
-    return (async () => {
-      try {
-        const instance = await MicVAD.new({
+  function takeStream(): Promise<MediaStream> {
+    const taken = handoff;
+    handoff = null;
+    return taken ? Promise.resolve(taken) : Promise.reject(new Error("no mic stream handed over"));
+  }
+
+  /** Drops a MicVAD that failed to start: an errored instance ignores later starts. */
+  async function discard(instance: NonNullable<typeof vad>): Promise<void> {
+    vad = null;
+    try {
+      await instance.destroy();
+    } catch (err) {
+      log.debug("discard_failed", { error: String(err) });
+    }
+  }
+
+  async function run(): Promise<void> {
+    try {
+      if (vad === null) {
+        vad = await MicVAD.new({
           redemptionMs: options.silenceMs?.() ?? 1500,
           baseAssetPath: VAD_ASSET_PATH,
           onnxWASMBasePath: VAD_ASSET_PATH,
+          startOnLoad: false,
+          // The wrapper acquires the stream, so a denied prompt never reaches the instance.
+          getStream: takeStream,
+          resumeStream: takeStream,
           onSpeechStart: () => onState?.("listening"),
           onSpeechRealStart: () => onSpeechActive?.(),
           onSpeechEnd,
         });
-        if (disposeRequested) {
-          await instance.destroy();
-          return;
-        }
-        vad = instance;
-        if (stopRequested) return; // stop() landed mid-load — leave it paused, don't start
-        await vad.start();
-      } catch (err) {
-        // getUserMedia / VAD asset load can fail (e.g. denied mic permission); surface it instead of throwing.
-        log.warn("start_failed", { error: String(err) });
-        vad = null;
-        onState?.("error", describeStartError(err));
-      } finally {
-        loading = false;
-        startPromise = null;
       }
-    })();
+      if (!wanted || capturing) return;
+      const instance = vad;
+      const acquired = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+      if (!wanted) {
+        releaseTracks(acquired);
+        return;
+      }
+      handoff = acquired;
+      try {
+        await instance.start();
+      } catch (err) {
+        handoff = null;
+        releaseTracks(acquired);
+        await discard(instance);
+        throw err;
+      }
+      capturing = true;
+      // stop() landed while capture was starting; the pause releases it.
+      if (!wanted) {
+        capturing = false;
+        void instance.pause();
+      }
+    } catch (err) {
+      // getUserMedia / VAD asset load can fail (e.g. denied mic permission); surface the cause.
+      log.warn("start_failed", { error: String(err) });
+      const detail = describeStartError(err);
+      onState?.("error", detail);
+      throw new Error(detail);
+    }
   }
 
   return {
     start(): Promise<void> {
       // Without stt_base_url, STT is unavailable — silently no-op.
       if (!config().stt_base_url) return Promise.resolve();
-      if (loading) return startPromise ?? Promise.resolve();
-      // MicVAD.start() is itself idempotent (no-ops if already listening) and resumes
-      // cleanly from a paused state, so reuse the loaded instance instead of reloading.
-      if (vad !== null) return vad.start();
-      startPromise = load();
+      wanted = true;
+      // MicVAD.start() is itself idempotent (no-ops if already listening) and resumes cleanly from a
+      // paused state, so a loaded instance is reused instead of reloaded.
+      startPromise ??= run().finally(() => {
+        startPromise = null;
+      });
       return startPromise;
     },
 
     stop() {
-      if (loading) {
-        stopRequested = true;
-        return;
+      wanted = false;
+      generation++;
+      if (startPromise === null) {
+        capturing = false;
+        void vad?.pause();
       }
-      vad?.pause();
     },
 
     async dispose() {
-      if (loading) {
-        disposeRequested = true;
-        await startPromise;
-        return;
-      }
+      wanted = false;
+      generation++;
+      await startPromise?.catch(() => {});
       if (vad) {
-        await vad.destroy();
+        const instance = vad;
         vad = null;
+        capturing = false;
+        await instance.destroy().catch((err: unknown) => {
+          log.debug("destroy_failed", { error: String(err) });
+        });
       }
     },
   };

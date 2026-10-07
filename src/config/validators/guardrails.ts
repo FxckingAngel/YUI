@@ -1,5 +1,35 @@
-import type { AttachmentLimits, GuardrailsConfig } from "../load";
 import { assertValid, ConfigError, isObject } from "./shared";
+
+/** Attach-time caps on one turn's image attachments. */
+export interface AttachmentLimits {
+  /** Max images held for one turn. Further attachments are refused. */
+  max_count: number;
+  /** Max source-file size (bytes) for one image. Larger files are refused. */
+  max_image_bytes: number;
+}
+
+/** configs/guardrails.json — debounce/rate-limit values. */
+export interface GuardrailsConfig {
+  /** per-source debounce window (ms). 0 = no debounce. */
+  debounce_ms: {
+    os_event_watcher: number;
+    user_input_source: number;
+    screen_watcher: number;
+  };
+  /** rolling rate-limit. */
+  rate_limit: {
+    /** rolling window length (ms). */
+    window_ms: number;
+    /** tier2 cap. */
+    tier2_max: number;
+    /** overall cap on backend calls — entering cooldown when exceeded. */
+    overall_max: number;
+    /** cooldown duration (ms) after overall is exceeded. */
+    cooldown_ms: number;
+  };
+  /** attach-time caps on turn attachments. */
+  attachments: AttachmentLimits;
+}
 
 export function validateGuardrails(file: string, raw: unknown): GuardrailsConfig {
   if (!isObject(raw)) throw new ConfigError(file, ["not an object"]);
@@ -32,7 +62,7 @@ export function validateGuardrails(file: string, raw: unknown): GuardrailsConfig
 
   // rate_limit
   const rawRate = raw.rate_limit;
-  const rate_limit = { window_ms: 0, tier2_max: 0, tier3_max: 0, overall_max: 0, cooldown_ms: 0 };
+  const rate_limit = { window_ms: 0, tier2_max: 0, overall_max: 0, cooldown_ms: 0 };
   if (!isObject(rawRate)) {
     issues.push(`rate_limit must be an object (got: ${JSON.stringify(rawRate)})`);
   } else {

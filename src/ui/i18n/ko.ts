@@ -1,6 +1,6 @@
 /**
  * Korean strings.
- * tool.* keys stay English (same as en) — not translated per spec.
+ * tool.* keys stay English (same as en): not translated per spec.
  */
 const ko: Record<string, string> = {
   // tool labels (English — not translated)
@@ -20,7 +20,10 @@ const ko: Record<string, string> = {
   "voice.state.fired": "전달됨",
   "voice.state.error": "오류",
   "voice.error.not_configured": "설정 필요",
-  "voice.error.not_configured_fix": "백엔드 미설정 — 고급 설정 열기",
+  "voice.error.not_configured_fix": "백엔드 미설정. 연결 설정 열기",
+  "voice.error.mic_denied": "마이크 차단됨",
+  "voice.error.no_mic": "마이크 없음",
+  "voice.error.mic_unavailable": "마이크 사용 불가",
 
   // aria labels (parameterized)
   "aria.refresh_speaker": "{name} 참조 음성 갱신",
@@ -29,23 +32,48 @@ const ko: Record<string, string> = {
   "aria.preview_speaker": "{name} 미리듣기",
   "aria.voice_input": "음성 입력: {label}",
 
-  // surfaces (speech bubble · tool-status · text input)
+  // surfaces (speech bubble · status pill · text input)
+  "aria.back": "뒤로",
   "aria.attach_image": "이미지 첨부",
   "aria.input_field": "YUI에게 말 걸기",
   "aria.send": "보내기",
   "aria.stop": "멈추기",
   "aria.remove_attachment": "첨부 제거",
   "aria.dismiss_bubble": "말풍선 닫기",
+  "bubble.you": "나",
+  "bubble.quote_attached": "첨부 {count}장",
   "aria.dock_message": "말풍선을 캐릭터 창으로 되돌리기",
   "aria.pop_message": "말풍선을 메시지 창으로 분리",
   "aria.dismiss_error": "오류 닫기",
+
+  // phone top-row openers
+  "phone.open_history": "대화 기록",
+  "phone.open_settings": "설정",
+  "phone.voice.start_aria": "음성 입력 켜기",
+  "phone.voice.stop_aria": "음성 입력 끄기",
+  "phone.voice.section": "음성 입력",
+  "phone.voice.mode_tap": "탭해서 켜고 끄기",
+  "phone.voice.mode_always": "계속 듣기",
+  "phone.voice.mode_aria": "음성 입력 방식",
+  "phone.voice.note": "계속 듣기는 YUI가 열려 있는 동안 동작하고, 백그라운드로 가면 멈춥니다.",
+  "phone.general.stage_section": "무대",
+  "phone.general.bubble_section": "말풍선",
+  "phone.general.stage_aria": "무대 배경",
+  "phone.general.stage_default": "기본",
+  "phone.general.stage_image": "이미지",
+  "phone.general.image_label": "배경 이미지",
+  "phone.general.image_sub": "어둡게 덮어 글자 대비를 유지합니다.",
+  "phone.general.image_choose": "선택",
+  "phone.general.import_error": "이 이미지를 쓸 수 없습니다. PNG, JPEG, WebP 파일을 골라 주세요.",
+
   "input.placeholder": "말 걸기…",
   "input.error_auth": "인증 실패 · API 키 확인",
   "input.error_network": "응답 없음 · 연결 확인",
+  "input.error_http": "{status} {message}",
   "input.error_stall": "백엔드 응답 없음",
   "input.error_parse": "응답 처리 실패",
   "input.error_not_configured": "백엔드 미설정",
-  "input.error_open_advanced": "고급 열기",
+  "input.error_open_connection": "연결 열기",
   "input.attach_too_many": "이미지가 너무 많음 · 한 턴에 {max}장까지",
   "input.attach_too_large": "이미지가 너무 큼 · 장당 {max}MB까지",
   "input.attach_not_ready": "아직 첨부할 수 없음 · 상한을 불러오는 중",
@@ -53,21 +81,23 @@ const ko: Record<string, string> = {
   // message window name plate
   "plate.thinking": "생각 중",
   "plate.responding": "응답 중",
+  "plate.reconnecting": "재연결 중",
+  "plate.key_rejected": "키 거부됨",
 
   // chain-break (404) recovery notice
   "chain.reset_notice": "대화 컨텍스트가 초기화되었습니다",
-  "hotkey.register_failed": "소환 단축키 {accelerator} 등록 실패 — 다른 앱이 사용 중일 수 있어요",
+  "hotkey.register_failed": "소환 단축키 {accelerator} 등록 실패: 다른 앱이 사용 중일 수 있어요",
   "ingress.dead_notice":
-    "에이전트 이벤트 수신 시작 실패 (포트 {port} 사용 중) — 이번 세션에는 에이전트 알림이 꺼져요",
+    "에이전트 이벤트 수신 시작 실패 (포트 {port} 사용 중). 이번 세션에는 에이전트 알림이 꺼져요",
 
   // boot-failure notice
   "boot.error_title": "YUI를 시작하지 못했습니다",
-  "boot.error_config": "설정을 불러오지 못했습니다 — {file}",
+  "boot.error_config": "설정을 불러오지 못했습니다: {file}",
   "boot.error_vrm":
-    "VRM 모델을 찾을 수 없습니다 — resources/vrms/에 .vrm 파일을 넣고 다시 시작하세요.",
+    "VRM 모델을 찾을 수 없습니다. resources/vrms/에 .vrm 파일을 넣고 다시 시작하세요.",
   "boot.error_dismiss": "닫기",
 
-  // capture indicator
+  // status pill (capture)
   "capture.watching": "화면 보는 중",
 
   // cue-list internal labels
@@ -96,9 +126,15 @@ const ko: Record<string, string> = {
   "panel.pop_out": "창으로 빼기",
   "panel.message": "메시지 입력",
   "panel.close": "닫기",
-  "panel.rail_collapse": "섹션 목록 접기",
-  "panel.rail_expand": "섹션 목록 펼치기",
   "settings.title": "YUI 설정",
+  "help.section": "도움말",
+  "help.controls.label": "조작법",
+  "help.controls.sub": "단축키와 마우스 조작을 유이가 직접 설명합니다.",
+  "help.controls.request": "YUI 조작법 알려줘",
+  "help.capabilities.label": "할 수 있는 일",
+  "help.capabilities.sub": "이 앱으로 유이와 함께 할 수 있는 일을 소개합니다.",
+  "help.capabilities.request": "YUI로 뭘 할 수 있는지 알려줘",
+  "help.ask": "물어보기",
   "devtools.label": "개발자 도구",
   "devtools.sub": "전송 컨텍스트와 모션 미리보기",
   "devtools.open": "열기",
@@ -118,13 +154,14 @@ const ko: Record<string, string> = {
   "devtools.advanced.context_window_default": "기본값",
 
   // tabs
+  "tabs.conn": "연결",
   "tabs.talk": "대화",
   "tabs.char": "캐릭터",
   "tabs.input": "입력",
-  "tabs.adv": "고급",
   "tabs.react": "말걸기",
   "tabs.react_hint": "유이가 먼저 말을 거는 규칙",
   "tabs.hist": "기록",
+  "tabs.general": "일반",
 
   // reasoning effort segment
   "reasoning.label": "추론 강도",
@@ -194,7 +231,6 @@ const ko: Record<string, string> = {
   "vrm.swap_error": "이 모델을 불러오지 못했어요. 이전 모델로 되돌렸어요.",
 
   // speaker section
-  "speaker.section": "음성",
   "speaker.group_aria": "화자",
   "speaker.add": "파일에서 추가…",
   "speaker.import_error": "이 음성을 업로드하지 못했어요. 오디오 파일과 TTS 서버를 확인해 주세요.",
@@ -209,6 +245,11 @@ const ko: Record<string, string> = {
   "speaker.rename_hint_save": "저장",
   "speaker.rename_hint_cancel": "취소",
   "speaker.import_overwrite_warn": "같은 이름의 기존 음성을 덮어써요",
+  "speaker.import_taken_warn": "다른 제공자의 음성이 이 이름을 쓰고 있어요",
+  "speaker.manual_aria": "음성 ID 붙여넣기",
+  "speaker.manual_placeholder": "음성 ID 붙여넣기…",
+  "speaker.manual_invalid": "쓸 수 없는 음성 ID예요",
+  "speaker.manual_taken": "다른 제공자의 음성이 이미 이 ID를 쓰고 있어요",
   "speaker.loading": "불러오는 중…",
   "speaker.swapping": "바꾸는 중…",
   "speaker.refreshing": "갱신 중…",
@@ -268,10 +309,13 @@ const ko: Record<string, string> = {
   "viewpoint.section": "시점",
   "viewpoint.sub": "Shift + 드래그로 회전, 스크롤로 확대",
   "viewpoint.reset": "정면으로 초기화",
+  "viewpoint.view_section": "보기",
+  "viewpoint.reset_view_label": "시점 초기화",
+  "viewpoint.reset_view_sub": "회전과 확대를 처음 상태로 되돌립니다.",
+  "viewpoint.reset_view_button": "초기화",
 
   // screenshot / input tab
   "screenshot.label": "스크린샷 첨부",
-  "screenshot.sub": "대화할 때 화면을 함께 봐요",
   "screenshot.source_label": "보낼 화면",
   "screenshot.source_aria": "보낼 화면",
   "screenshot.monitor_primary": "주 화면",
@@ -284,7 +328,6 @@ const ko: Record<string, string> = {
   // voice input
   "voice_input.label": "음성 입력",
   "voice_input.sub": "말이 끝나면 STT 후 사용자 입력으로 보내요",
-  "voice_input.aria": "음성 입력",
   "voice_input.silence_label": "침묵 기준",
   "voice_input.silence_sub": "말이 끝난 뒤 이만큼 기다렸다가 전송해요",
   "voice_input.silence_aria": "침묵 기준",
@@ -314,24 +357,23 @@ const ko: Record<string, string> = {
   // cue lists (input tab)
   "cue.schedule_title": "시간대 인사",
   "cue.schedule_sub": "정한 시각에 자리에 있으면 먼저 말을 걸어요",
-  "cue.schedule_add": "+ 인사 추가",
+  "cue.schedule_add": "인사 추가",
   "cue.proactive_title": "루프 반응",
   "cue.proactive_sub": "작업 중에 한동안 조용하면 주기적으로 먼저 말을 걸어요",
-  "cue.proactive_add": "+ 반응 추가",
+  "cue.proactive_add": "반응 추가",
 
   // endpoints
-  "endpoints.section": "엔드포인트",
-  "endpoints.summary_hint": "고급 — 서버 주소·모델",
   "endpoints.field_sub": "비우면 기본값을 사용해요",
-  "endpoints.reset": "기본값으로 되돌리기",
   "endpoints.url_error": "올바른 URL이 아니에요 (http:// 또는 https://)",
   "endpoints.chat_base_url.label": "채팅 서버 URL",
   "endpoints.stt_base_url.label": "음성 인식(STT) 서버 URL",
+  "endpoints.stt_model.label": "STT 모델",
   "endpoints.tts_base_url.label": "음성 합성(TTS) 서버 URL",
+  "endpoints.tts_model.label": "TTS 모델",
   "endpoints.broker_base_url.label": "표현 브로커(Broker) URL",
   "endpoints.chat_model.label": "채팅 모델",
 
-  // per-service sections (advanced tab)
+  // per-service sections (connection tab)
   "svc.type_label": "유형",
   "svc.chat": "채팅",
   "svc.chat_aria": "채팅 API 종류",
@@ -353,7 +395,8 @@ const ko: Record<string, string> = {
   "svc.stt_type": "OpenAI 호환",
   "svc.tts": "TTS",
   "svc.tts_hint": "OpenAI 호환",
-  "svc.tts_type": "OpenAI 호환",
+  "svc.tts_type": "제공자",
+  "svc.tts_preset_aria": "TTS 제공자 프리셋",
   "svc.broker": "Broker",
   "svc.broker_hint": "MCP streamable-http",
   "svc.broker_type": "MCP streamable-http",
@@ -363,32 +406,30 @@ const ko: Record<string, string> = {
   "svc.reset_broker": "Broker 되돌리기",
 
   // chat API key
-  "chatkey.section": "채팅 API 키",
   "chatkey.label": "채팅 API 키",
-  "chatkey.sub_default": "기본값 사용 중 — 비워두면 빌드 시 설정한 키를 써요",
-  "chatkey.sub_override": "이 기기에 저장됨 — 비우면 원래 키로 돌아가요",
+  "chatkey.sub_default": "기본값 사용 중: 비워두면 빌드 시 설정한 키를 써요",
+  "chatkey.sub_override": "이 기기에 저장됨. 비우면 원래 키로 돌아가요",
   "chatkey.show": "키 보기",
   "chatkey.hide": "키 숨기기",
   "chatkey.clear": "키 지우기",
 
   // STT API key
   "sttkey.label": "STT API 키",
-  "sttkey.sub_default": "기본값 사용 중 — 비워두면 빌드 시 설정한 키를 써요",
-  "sttkey.sub_override": "이 기기에 저장됨 — 비우면 원래 키로 돌아가요",
+  "sttkey.sub_default": "기본값 사용 중: 비워두면 빌드 시 설정한 키를 써요",
+  "sttkey.sub_override": "이 기기에 저장됨. 비우면 원래 키로 돌아가요",
   "sttkey.show": "키 보기",
   "sttkey.hide": "키 숨기기",
   "sttkey.clear": "키 지우기",
 
   // TTS API key
   "ttskey.label": "TTS API 키",
-  "ttskey.sub_default": "기본값 사용 중 — 비워두면 빌드 시 설정한 키를 써요",
-  "ttskey.sub_override": "이 기기에 저장됨 — 비우면 원래 키로 돌아가요",
+  "ttskey.sub_default": "기본값 사용 중: 비워두면 빌드 시 설정한 키를 써요",
+  "ttskey.sub_override": "이 기기에 저장됨. 비우면 원래 키로 돌아가요",
   "ttskey.show": "키 보기",
   "ttskey.hide": "키 숨기기",
   "ttskey.clear": "키 지우기",
 
   // performance
-  "perf.section": "성능",
   "perf.idle_label": "유휴 시 절전 (30fps)",
   "perf.idle_sub":
     "캐릭터가 가만히 있을 때 프레임을 낮춰 전력을 아낍니다. 말하거나 움직일 땐 자동으로 부드러워집니다.",
@@ -411,7 +452,7 @@ const ko: Record<string, string> = {
   "hint.first_run": "우클릭하면 컨트롤이 열려요 · {hotkey}로 말 걸 수 있어요",
   "hint.first_run_no_hotkey": "우클릭하면 컨트롤이 열려요",
   "hint.setup_backend":
-    "아직 생각할 백엔드가 없어요 · 우클릭해서 고급 탭을 열고 OpenAI 호환 서버를 지정해 주세요",
+    "아직 생각할 백엔드가 없어요 · 우클릭해서 연결 탭을 열고 OpenAI 호환 서버를 지정해 주세요",
 
   // reactions tab
   "reactions.watchers_title": "감시",
@@ -430,7 +471,7 @@ const ko: Record<string, string> = {
   "reactions.rate_hint":
     "YUI가 먼저 말을 거는 빈도의 상한이에요. 내가 보낸 메시지는 세지 않아요. 비워 두면 기본값을 써요.",
   "reactions.rate_tier2_label": "시간당 말 걸기",
-  "reactions.rate_tier2_sub": "자리 비움·자발적 말 걸기·일정·에이전트 알림을 합쳐서 세요",
+  "reactions.rate_tier2_sub": "자리 비움, 자발적 말 걸기, 일정, 에이전트 알림을 합쳐서 세요",
   "reactions.rate_overall_label": "시간당 먼저 건 대화 전체",
   "reactions.rate_overall_sub": "넘어서면 쿨다운 동안 모두 멈춰요",
   "reactions.rate_hint_text":
@@ -496,11 +537,12 @@ const ko: Record<string, string> = {
   "deleg.done_ago": "끝남 · {time} 전",
   "deleg.failed": "실패",
   "deleg.failed_ago": "실패 · {time} 전",
+  "deleg.unknown": "결과 확인 필요",
+  "deleg.unknown_ago": "결과 확인 필요 · {time} 전",
   "deleg.took": "걸린 시간 {time}",
 
   // reasoning
   "think.chip": "추론",
-  "aria.think_toggle": "추론 내용 보기·숨기기",
 };
 
 export default ko;

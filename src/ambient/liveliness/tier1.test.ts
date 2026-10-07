@@ -31,7 +31,7 @@ function makeBone(): FakeBone {
   return { rotation: r };
 }
 
-function makeVrm(opts: { blink?: boolean } = {}) {
+function makeVrm(opts: { blink?: boolean; metaVersion?: "0" | "1" } = {}) {
   const blink = opts.blink ?? true;
   const bones: Record<string, FakeBone> = {
     head: makeBone(),
@@ -42,6 +42,7 @@ function makeVrm(opts: { blink?: boolean } = {}) {
   const exprValues: Record<string, number> = {};
   const present = new Set(blink ? ["blink"] : []);
   const vrm = {
+    meta: { metaVersion: opts.metaVersion ?? "1" },
     humanoid: {
       getNormalizedBoneNode: (name: string) => bones[name] ?? null,
     },
@@ -151,27 +152,27 @@ describe("Tier1Engine — drives a VRM (headless)", () => {
     }
   });
 
-  it("tap_react one-shot adds a transient head pitch bob, then settles back", () => {
-    const { renderer, getTick } = makeRenderer();
-    const m = makeVrm();
-    const engine = createTier1Engine(renderer);
-    engine.start();
-    const tick = getTick();
+  /** Head pitch at the idle_returned peak, minus the same moment without the cue. */
+  function idleReturnedPitch(metaVersion: "0" | "1"): number {
+    const headXAt = (withCue: boolean) => {
+      const { renderer, getTick } = makeRenderer();
+      const m = makeVrm({ metaVersion });
+      const engine = createTier1Engine(renderer);
+      engine.start();
+      drive(getTick(), m, 2);
+      if (withCue) engine.trigger("idle_returned");
+      const peak = drive(getTick(), m, 0.45);
+      return peak[peak.length - 1].headX;
+    };
+    return headXAt(true) - headXAt(false);
+  }
 
-    // baseline pitch at t≈2.0s (sway only)
-    drive(tick, m, 2);
-    const before = m.bones.head.rotation.x;
+  it("idle_returned tips the head upward on a VRM 1.0 model, which faces +Z", () => {
+    expect(idleReturnedPitch("1")).toBeLessThan(-0.05);
+  });
 
-    engine.trigger("tap_react");
-    // advance ~110ms (≈ bob peak at 220ms/2) → large deviation
-    const peak = drive(tick, m, 0.11);
-    const peakX = peak[peak.length - 1].headX;
-    expect(Math.abs(peakX - before)).toBeGreaterThan(0.05); // bob is visible
-
-    // After bob fully elapses, pitch returns to sway-only magnitude
-    drive(tick, m, 0.5);
-    const after = m.bones.head.rotation.x;
-    expect(Math.abs(after)).toBeLessThan(0.1);
+  it("idle_returned tips the head upward on a VRM 0.x model, whose native facing flips the pitch sign", () => {
+    expect(idleReturnedPitch("0")).toBeGreaterThan(0.05);
   });
 
   it("gracefully no-ops on a VRM without a blink expression", () => {

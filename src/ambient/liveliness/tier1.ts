@@ -4,15 +4,13 @@
  * Always on, **backend-independent** (no network). Via the renderer.onTick(rAF) hook, every frame
  * it writes bone (head/spine/chest) rotations + the blink expression just before vrm.update.
  * Ambient "owns" these channels (head/spine/chest rotation, blink) — it overwrites them with
- * absolute values every frame. While backend motion plays, the renderer takes over weight blending
- * (idle_sway weight 0.3→0.1 during motion playback).
+ * absolute values every frame.
  *
  * Cue table:
  *  - blink         : random 3~6s, 150ms pulse
  *  - idle_sway     : always, head/spine multi-frequency sine
  *  - breath        : 4s period, chest/spine sine
  *  - look_around   : random 30~120s, head gaze target shift (damped)
- *  - tap_react     : one head bob (nod) ~220ms on user.tap
  *  - idle_returned : one slight upward gaze ~900ms
  *
  * Pure cue math lives in ./cues.ts. Here we only handle timers, state, and VRM writes.
@@ -20,15 +18,15 @@
 
 import type { VRM } from "@pixiv/three-vrm";
 import type { Object3D } from "three";
-import type { Renderer, TickContext } from "../../renderer";
+import { downPitchSign, type Renderer, type TickContext } from "../../renderer";
 import * as cues from "./cues";
 
-type AmbientCue = "blink" | "idle_sway" | "breath" | "look_around" | "tap_react" | "idle_returned";
+type AmbientCue = "blink" | "idle_sway" | "breath" | "look_around" | "idle_returned";
 
 export interface Tier1Engine {
   /** Register the renderer.onTick hook + start periodic cues. */
   start(): void;
-  /** Trigger a one-shot cue (tap_react / idle_returned). */
+  /** Trigger a one-shot cue (idle_returned). */
   trigger(cue: AmbientCue): void;
   /** Unregister the hook + stop. */
   stop(): void;
@@ -43,12 +41,13 @@ const SWAY = {
 } as const;
 const BREATH_AMP = 0.022; // chest sine
 const LOOK_LAMBDA = 1.8; // look target damping speed
-const TAP_BOB_AMP = 0.13; // tap nod (downward, pitch+)
-const IDLE_RETURN_AMP = -0.09; // slight upward on idle return (pitch-)
+const IDLE_RETURN_AMP = -0.09; // slight upward on idle return
 
 /** Capabilities resolved once per VRM (which bones/expressions exist). Re-resolved on hot-swap. */
 interface Caps {
   head: Object3D | null;
+  /** Multiplies a downward-positive head pitch into this VRM's rotation.x. */
+  pitchSign: 1 | -1;
   spine: Object3D | null;
   chest: Object3D | null;
   /** Blink expression names to use (single 'blink', or blinkLeft/Right). */
@@ -56,7 +55,6 @@ interface Caps {
 }
 
 interface OneShot {
-  kind: "tap" | "idle_returned";
   /** Fixed within a tick. -1 = not yet started (fixed to the next tick's tMs). */
   startMs: number;
 }
@@ -121,7 +119,7 @@ export function createTier1Engine(renderer: Renderer): Tier1Engine {
         blinkNames = pair;
       }
     }
-    return { head, spine, chest, blinkNames };
+    return { head, pitchSign: downPitchSign(vrm), spine, chest, blinkNames };
   }
 
   function tick(ctx: TickContext): void {
@@ -184,19 +182,14 @@ export function createTier1Engine(renderer: Renderer): Tier1Engine {
       const os = oneShots[i];
       if (os.startMs < 0) os.startMs = tMs; // fix the start time on the first tick
       const e = tMs - os.startMs;
-      if (os.kind === "tap") {
-        bobPitch += TAP_BOB_AMP * cues.bobEnvelope(e, cues.TAP_BOB_MS);
-        if (e >= cues.TAP_BOB_MS) oneShots.splice(i, 1);
-      } else {
-        bobPitch += IDLE_RETURN_AMP * cues.bobEnvelope(e, cues.IDLE_RETURNED_MS);
-        if (e >= cues.IDLE_RETURNED_MS) oneShots.splice(i, 1);
-      }
+      bobPitch += IDLE_RETURN_AMP * cues.bobEnvelope(e, cues.IDLE_RETURNED_MS);
+      if (e >= cues.IDLE_RETURNED_MS) oneShots.splice(i, 1);
     }
 
     // ── After composing, write absolute values (ambient owns these channels) ──
     if (c.head) {
       c.head.rotation.set(
-        sway.headPitch * SWAY.headPitch + lookPitch + bobPitch, // x = pitch
+        c.pitchSign * (sway.headPitch * SWAY.headPitch + lookPitch + bobPitch), // x = pitch
         sway.headYaw * SWAY.headYaw + lookYaw, // y = yaw
         sway.headRoll * SWAY.headRoll, // z = roll
       );
@@ -223,8 +216,7 @@ export function createTier1Engine(renderer: Renderer): Tier1Engine {
     },
     trigger(cue) {
       // Queue one-shots only (periodic cues are automatic). startMs is fixed on the next tick (-1 sentinel).
-      if (cue === "tap_react") oneShots.push({ kind: "tap", startMs: -1 });
-      else if (cue === "idle_returned") oneShots.push({ kind: "idle_returned", startMs: -1 });
+      if (cue === "idle_returned") oneShots.push({ startMs: -1 });
       // blink/idle_sway/breath/look_around are handled by the periodic engine — no-op.
     },
     stop() {

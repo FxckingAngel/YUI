@@ -3,12 +3,13 @@
 This is **not a wire schema** — `client_context` is prompt text riding inside the
 turn's user message. Nothing on either side parses it programmatically; its only
 reader is the backend model, so the format only has to stay stable and readable to a
-model, not machine-parseable. It applies to both chat protocols YUI supports
-(`chat_api` in `configs/endpoints.json`). The sections below describe Responses mode;
+model, not machine-parseable. It applies to all three chat protocols YUI supports
+(`chat_api` in `configs/endpoints.json`: Responses, Chat Completions, and push). The sections below describe Responses mode;
 Chat Completions mode carries the same rendered lines and the same `generate_express`
 cue over a different transport, where the client declares the tool itself and answers
 the call — see [CC mode transport](#cc-mode-transport-chat-completions) at the end of
-this doc for the deltas.
+this doc for the deltas. Push mode sends the same block as the `turn` frame's
+`client_context` field; its frames are in [push-transport.md](push-transport.md).
 
 ## Per-turn client context (client → agent)
 
@@ -220,6 +221,26 @@ whether to speak (firing ≠ judgment).
 trigger: user message
 ```
 
+### Guide (in-app help button)
+
+The Help section of the settings panel submits a short request as an ordinary user turn
+(`trigger.kind` `user`) and names the bundled guide that answers it in `trigger.guide`
+(`controls` or `capabilities`). The user's message is only the short request; the guide
+text rides in the context block as a `guide:` block after the headline:
+
+```text
+trigger: user message
+guide:
+The user pressed the in-app help button. Answer from the guide below: start with the few most-used items, keep it short, and offer to go on; do not include links.
+
+<the guide's Markdown>
+```
+
+The guide text is expanded when the block is rendered, so the turn records and the context
+history hold only the key. The `controls` guide is `docs/guide/controls.md` and the
+`capabilities` guide is `docs/guide/capabilities.md`, both bundled with the app. Every
+transport sends the same block.
+
 ### Cue (schedule / proactive)
 
 ```text
@@ -322,9 +343,8 @@ evict other sessions' buffered events out of the per-tool cap.
 ### Signals
 
 ```text
-trigger: signals (2 signals)
+trigger: signals (1 signal)
 signal [github/push @2026-08-23T01:36:40.000Z, id delivery-42]: {"repo":"acme/yui","branch":"main"}
-signal: {"source":"heartbeat","ts":1781000000000}
 signal [calendar/sync @2026-08-23T01:36:40.000Z, id delivery-43]: (no payload)
 ```
 
@@ -334,16 +354,17 @@ occurrence time, and normalized event id. An enveloped group with no items rende
 `(no payload)` line and contributes zero to the headline count. Envelope `delivery` is
 not rendered.
 
-Legacy groups retain the `signal: {json}` format. Signal items remain opaque,
-heterogeneous objects with no client-known shape, so JSON preserves their structure.
-Signal lines are independent of the headline and also appear alongside a cue headline:
-`proactive.tap_bored` turns carry both their configured cue and drained signal groups.
+Signal items remain opaque, heterogeneous objects with no client-known shape, so JSON
+preserves their structure. Signal lines are independent of the headline and also appear
+alongside a cue headline: `proactive.tap_bored` turns carry both their configured cue
+and drained signal groups. Every group carries the ingress envelope; the required
+request contract lives in [Signals ingress](./signals-ingress.md).
 
 ### Milestone
 
 ```text
 trigger: milestone first_activity (08:12)
-signal [cron/daily_briefing @2026-09-11T22:30:00.000Z, id daily-briefing:2026-09-11]: {"skill":"yui-daily-briefing", ...}
+signal [calendar/reminder @2026-09-11T22:30:00.000Z, id reminder-118]: {"title":"standup","at":"09:30"}
 ```
 
 `time_milestone.first_activity` fires once per local day, on the first `os_idle_tick`
@@ -359,8 +380,6 @@ A few `ClientContext` fields carry no rendered line, by design:
 
 | Field | Why it's omitted |
 |---|---|
-| `cue.local_time` | Current local time when the schedule cue fires — redundant with the `time:` line, which already states the current instant |
-| `cue.idle_min` | Configured idle *threshold* — redundant with `idle_elapsed_min`, which states the actual elapsed minutes that caused the cue to fire |
 | `trigger.agent.cwd` (`agent_catchup` items carry no `cwd` field at all) | Host filesystem detail; the project name already identifies the work, and the agent has no use for a local path when reacting verbally |
 | `trigger.agent.session_id`, `trigger.agent_catchup.items[].session_id` | An opaque hook-continuity token the client itself doesn't interpret (see below) — no verbal content for the backend to act on |
 
@@ -456,10 +475,11 @@ While `body:` is `sitting` or `peeking`, the client drops `motion_id` and keeps 
 All fields are optional. Include only the fields that should change.
 
 `emotion_text` and `caption` are two separate voice channels and combine freely.
-`emotion_text` is a tag from the published emoji set, prepended to the spoken
-segment. `caption` is a free sentence describing how the voice should sound —
-Japanese reads best — carried beside the audio request rather than in the
-speech. Neither is ever spoken aloud or shown in the speech bubble.
+`emotion_text` is a voice tone tag: a tag from the published set when the
+vocabulary is in enum mode, a few words naming the tone in free mode. `caption`
+is a free sentence describing how the voice should sound. Both travel beside the
+spoken text to the TTS provider, which renders them in its own way. Neither is
+ever spoken aloud or shown in the speech bubble.
 
 ## Basic Pattern
 
@@ -605,9 +625,16 @@ To keep the sentence neutral, stream the text without calling `generate_express`
 In Chat Completions mode (`chat_api: "chat_completions"`) the same rendered lines are
 sent as the CC `messages` array instead of Responses `input[]`, and CC keeps a real
 system slot: a `system` message with the persona/global instructions (if configured),
-a `system` message with `client_context:\n<rendered lines>`, the trimmed conversation
-transcript, then the `user` message carrying the utterance or background marker
-alone.
+the trimmed conversation transcript, a `system` message with
+`client_context:\n<rendered lines>`, then the `user` message carrying the utterance
+or background marker alone. The `client_context` message changes every turn, so it
+sits after the transcript: the instructions and transcript stay an identical prefix
+from one turn to the next, which provider prompt caches reuse.
+
+A user turn that carried a guide key stores the key in its transcript entry. When the
+transcript is replayed, a `system` message `client_context:\n<guide block>` with the
+currently bundled guide sits right before that user entry, and the entry's token cost
+includes the guide, so both leave the window together.
 
 ### Client-declared tools
 
@@ -624,6 +651,7 @@ publishes to the broker:
 | `emotion_id` | `string`, `enum` = the loaded emotion registry's ids |
 | `motion_id` | `string`, `enum` = the loaded motion registry's agent-triggerable ids (reactive, ambient, and `broker_publish: false` motions excluded), narrowed by the user's expression-motion selection |
 | `emotion_text` | `string`; on an enum-mode TTS provider, `enum` = that provider's tag table with each tag's meaning in the description, otherwise free text |
+| `caption` | `string`, free-text voice direction for the speech around the call, separate from `emotion_text` |
 
 Every declared parameter is optional and the object takes no other properties,
 matching the [tool arguments](#tool-arguments) above. A vocabulary edit (a new

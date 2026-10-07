@@ -9,7 +9,7 @@ import {
   CAMERA_AZIMUTH_DEFAULT,
   CAMERA_POLAR_DEFAULT,
   clampPolar,
-} from "../../renderer/geometry/camera-fit";
+} from "../../renderer/camera/camera-fit";
 import { createPersistedStore, localStorageStore, type PersistedStorage } from "../persisted-store";
 
 export const CAMERA_ZOOM_MIN = 0.5;
@@ -93,6 +93,15 @@ export function createCameraSettings(opts?: { storage?: CameraStorage }) {
     resetOrbit(): void {
       core.commit({
         ...core.get(),
+        azimuth: CAMERA_AZIMUTH_DEFAULT,
+        polar: CAMERA_POLAR_DEFAULT,
+      });
+    },
+
+    /** Reset zoom and both orbit angles to their defaults in one commit. */
+    resetView(): void {
+      core.commit({
+        zoom: CAMERA_ZOOM_DEFAULT,
         azimuth: CAMERA_AZIMUTH_DEFAULT,
         polar: CAMERA_POLAR_DEFAULT,
       });

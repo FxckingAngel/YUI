@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PeekConfig, TapConfig } from "../config/load";
+import type { PeekConfig, TapConfig } from "../config/validators/avatar/types";
 import type { Logger } from "../logger";
 import type { BackendCaller } from "./backend/backend-caller";
 import { type BusEnvelope, createEventBus, type EventBus } from "./core/event-bus";
@@ -140,7 +140,7 @@ describe("dispatcher — structured logging: state_change events", () => {
 describe("dispatcher — structured logging: fire events", () => {
   it("emits logger.info('fire', {seq_id, event_name, tier}) for a tier1 drag_start", async () => {
     dispatcher.start();
-    bus.push(env({ event_name: "user.drag_start", hint_tier: 1 }));
+    bus.push(env({ event_name: "user.drag_start" }));
     await vi.advanceTimersByTimeAsync(20);
     expect(logger.info).toHaveBeenCalledWith(
       "fire",
@@ -164,7 +164,6 @@ describe("dispatcher — structured logging: fire events", () => {
       env({
         source: "os_event_watcher",
         event_name: "user.window_sit_enter",
-        hint_tier: 1,
         dnd_override: false,
       }),
     );
@@ -220,7 +219,7 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
     callDeferred[0].resolve("network_drop");
     await vi.advanceTimersByTimeAsync(20);
     expect(sink).toHaveBeenCalledTimes(1);
-    expect(sink).toHaveBeenCalledWith("network_drop", "text");
+    expect(sink).toHaveBeenCalledWith("network_drop", "text", undefined);
     d.stop();
   });
 
@@ -232,7 +231,7 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
     callDeferred[0].resolve("parse_error");
     await vi.advanceTimersByTimeAsync(20);
     expect(sink).toHaveBeenCalledTimes(1);
-    expect(sink).toHaveBeenCalledWith("parse_error", "voice");
+    expect(sink).toHaveBeenCalledWith("parse_error", "voice", undefined);
     d.stop();
   });
 
@@ -243,7 +242,37 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
     await vi.advanceTimersByTimeAsync(20);
     callDeferred[0].resolve("http_4xx_drop");
     await vi.advanceTimersByTimeAsync(20);
-    expect(sink).toHaveBeenCalledWith("http_4xx_drop", "text");
+    expect(sink).toHaveBeenCalledWith("http_4xx_drop", "text", undefined);
+    d.stop();
+  });
+
+  it("hands the server error detail to onUserTurnFailed as its third argument", async () => {
+    const sink = vi.fn();
+    const failingCaller: BackendCaller = {
+      call: (_turn, _signal, onErrorDetail) => {
+        onErrorDetail?.({ status: 400, message: "model does not support tools" });
+        return Promise.resolve("network_drop");
+      },
+    };
+    const d = createDispatcher({
+      bus,
+      renderer: renderer as never,
+      peekConfig: () => PEEK_CONFIG,
+      tapConfig: () => TAP_CONFIG,
+      backendCaller: failingCaller,
+      guardrails,
+      turnLog,
+      hasOutstandingSpeech: () => speaking,
+      logger,
+      onUserTurnFailed: sink,
+    });
+    d.start();
+    bus.push(env({ event_name: "user.text_submitted" }));
+    await vi.advanceTimersByTimeAsync(20);
+    expect(sink).toHaveBeenCalledWith("network_drop", "text", {
+      status: 400,
+      message: "model does not support tools",
+    });
     d.stop();
   });
 
@@ -264,7 +293,7 @@ describe("dispatcher — onUserTurnFailed seam (issue #274)", () => {
     d.stop();
   });
 
-  // A proactive/schedule turn failing must never reach speakFailure — bootstrap-configured.ts
+  // A proactive/schedule turn failing must never reach speakFailure — app/turn/wire-dispatcher.ts
   // calls voice.speakFailure(reason) unconditionally from this same sink, and nothing there
   // re-checks the trigger kind, so the gate has to hold here.
   it("does NOT fire for a proactive turn (window_sit), even on failure — speakFailure must never see it", async () => {
@@ -368,7 +397,6 @@ describe("dispatcher — structured logging: drop events via logger", () => {
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -393,7 +421,6 @@ describe("dispatcher — structured logging: drop events via logger", () => {
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -402,7 +429,6 @@ describe("dispatcher — structured logging: drop events via logger", () => {
         source: "os_event_watcher",
         event_name: "proactive.drag_held",
         ts: NOW + 2,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -462,7 +488,7 @@ describe("dispatcher — structured logging: turn events", () => {
     bus.push(env());
     await vi.advanceTimersByTimeAsync(20);
     // The speech gate passed, but no audio was ever owed (TTS off).
-    turnLog.setSpokeText(true);
+    turnLog.setSpokeText(turnLog.current()!.id, true);
     callDeferred[0].resolve("ok");
     await vi.advanceTimersByTimeAsync(20);
 
@@ -476,7 +502,7 @@ describe("dispatcher — structured logging: turn events", () => {
     dispatcher.start();
     bus.push(env());
     await vi.advanceTimersByTimeAsync(20);
-    turnLog.setSpokeText(false);
+    turnLog.setSpokeText(turnLog.current()!.id, false);
     callDeferred[0].resolve("ok");
     await vi.advanceTimersByTimeAsync(20);
 
@@ -559,7 +585,6 @@ describe("dispatcher — structured logging: turn events", () => {
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW,
-        hint_tier: 2,
         dnd_override: false,
         ...over,
       };

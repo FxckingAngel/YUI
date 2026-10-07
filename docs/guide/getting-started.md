@@ -1,6 +1,6 @@
 # YUI — Install and Wiring Guide
 
-YUI is the frontend (head): VRM character rendering, desktop-pet behavior, and I/O surfaces. The brain and voice services — backend agent, broker, TTS, STT — run as separate, config-swappable processes that YUI points at via `configs/endpoints.json` or the in-app panel (right-click the character → **Advanced**).
+YUI is the frontend (head): VRM character rendering, desktop-pet behavior, and I/O surfaces. The brain and voice services — backend agent, broker, TTS, STT — run as separate, config-swappable processes that YUI points at via `configs/endpoints.json` or the in-app panel (right-click the character → Settings → **Connection** tab).
 
 ## What you need
 
@@ -9,7 +9,7 @@ One VRM model — and one ships in the repo (`resources/vrms/Sendagaya_Shino.vrm
 | Component | Status | Without it |
 |---|---|---|
 | VRM model | **Bundled** — bring your own optional (§2) | — |
-| Chat backend (`chat_base_url`) | Optional | Character appears and idles; a chat turn answers with an inline "Backend not configured" pointer to **Advanced** |
+| Chat backend (`chat_base_url`) | Optional | Character appears and idles; a chat turn answers with an inline "Backend not configured" pointer to **Connection** |
 | Chat API key | Optional | Only needed when the endpoint enforces one; set in the panel or `.env.local` |
 | Expression MCP Broker | Optional — Responses mode with a backend agent | Chat Completions mode bakes the vocabulary into the client-declared tool, no broker involved |
 | TTS | Optional | Speech bubble works; no audio output |
@@ -21,7 +21,7 @@ One VRM model — and one ships in the repo (`resources/vrms/Sendagaya_Shino.vrm
 
 ## 1. Run YUI itself
 
-With Claude Code: open the repo and type `/yui-install` — the `yui-install` skill runs sections 1–2 and the wiring in 4–7 interactively and verifies the build. The rest of this page is the manual path and the reference for the external services.
+A coding agent can run sections 1–2 and the wiring in 4–7 for you from [Install with a coding agent](install.md). The rest of this page is the manual path and the reference for the external services.
 
 ### Prerequisites
 
@@ -40,7 +40,7 @@ pnpm build            # production build
 
 ### Chat auth key
 
-If your chat endpoint requires a key, either paste it into the panel's Chat key field or copy `.env.example` to `.env.local` and set `VITE_YUI_CHAT_KEY`. The key set in the panel wins; `.env.local` (gitignored) is the fallback used when the panel field is empty. It is read at build time, so restart the dev server after editing it.
+If your chat endpoint requires a key, either paste it into the panel's Chat key field or copy `.env.example` to `.env.local` and set `VITE_YUI_CHAT_KEY`. The key set in the panel wins; `.env.local` (gitignored) is the fallback used when the panel field is empty. It is read at build time, so restart the dev server after editing it. This fallback applies to dev runs (`pnpm dev`, `pnpm tauri:dev`) only — a release build carries no key from the environment, so release users enter their keys in the panel's Connection tab, which stores them on the device.
 
 ```bash
 cp .env.example .env.local
@@ -56,12 +56,16 @@ The bundled `Sendagaya_Shino.vrm` is what `configs/avatar.json` → `vrm_url` lo
 - **In the Tauri app** — open the panel's VRM section and import the file with the OS picker. The file is copied into the app data directory and added to the model list; nothing in the repo changes.
 - **From the repo (`pnpm dev` or `pnpm tauri dev`)** — drop the file into `resources/vrms/` (gitignored except the bundled default; Vite serves `/vrms/*` from there) and point `configs/avatar.json` at it: set `vrm_url` to `/vrms/<file>.vrm` and add a matching entry to `available` (`{ "id", "label", "url", "source": "bundled" }`; `id` is limited to `[A-Za-z0-9._-]`).
 
-Per-model framing (`framing.margin`, `framing.fov`) and the hit-test alpha threshold (`hit_test.alpha_threshold`) live in `configs/avatar.json`.
+Per-model framing (`framing.margin`, `framing.fov`, and `framing.upper_body`, the vertical band of the model the phone frames by height as fractions of the model height from the feet) and the hit-test alpha threshold (`hit_test.alpha_threshold`) live in `configs/avatar.json`.
 Every tunable section in that file is required — the client reads each value from it and fails the load naming any key the file leaves out.
 
 ---
 
 ## 3. Chat backend
+
+The shortest path to a first chat needs no config file: right-click the character to open Settings, switch to the **Connection** tab (plug icon), and pick a **Provider** preset in the Chat section, fill in **Chat model** (and **Chat API key** for OpenAI or Groq), close the panel, press `/` (or `Cmd/Ctrl+Shift+Y`) to open the text input, and send a message.
+The preset — OpenAI, Ollama, LM Studio, or Groq — autofills the endpoint URL; the prerequisite is a running Ollama or LM Studio, or an OpenAI or Groq key.
+Chat Completions, the shipped default, needs a tool-calling model because the client always declares its `generate_express` tool (`src/io/chat/stream/chat-client.ts`): [`gpt-5-mini`](https://platform.openai.com/docs/models/gpt-5-mini) on OpenAI, [`qwen3`](https://ollama.com/library/qwen3) on Ollama (pull it first with `ollama pull qwen3`), [`llama-3.3-70b-versatile`](https://console.groq.com/docs/tool-use) on Groq.
 
 YUI supports three chat protocols, selected by `chat_api` in `configs/endpoints.json`. Options A and B work with any server that speaks the corresponding OpenAI API; `push` is a WebSocket contract for backends that deliver without a request, described in [push-transport.md](../reference/push-transport.md). The shipped file sets `chat_completions`; if the key is removed the client behaves as `responses`.
 
@@ -106,8 +110,8 @@ Any backend served over the OpenAI Responses API (`/v1/responses`); the [Hermes 
 | Feature | `chat_completions` | `responses` | `push` |
 | --- | --- | --- | --- |
 | Speech text and `generate_express` cues | yes | yes | yes |
-| Tool chip (which tool the backend is running) | yes | yes | yes |
-| Reasoning chip | — | yes, when the backend streams reasoning events | yes |
+| Status pill's tool segment (which tool the backend is running) | yes | yes | yes |
+| Reasoning at the top of the message window's bubble | — | yes, when the backend streams reasoning events | yes |
 | A reply the backend starts on its own | — | — | yes |
 | Delegation list and reports | — | — | yes |
 
@@ -121,7 +125,7 @@ The in-app agent settings expose reasoning effort (`none` · `minimal` · `low` 
 
 ## 4. Expression MCP Broker (optional)
 
-The broker publishes YUI's renderable emotion/motion/`emotion_text` vocabulary so a backend agent learns what the body can express at runtime. YUI publishes in both chat modes whenever `broker_base_url` is set, and silently skips it otherwise; only Responses mode needs the agent to read it back.
+The broker publishes YUI's renderable emotion/motion/`emotion_text` vocabulary so a backend agent learns what the body can express at runtime. YUI publishes in every chat mode whenever `broker_base_url` is set, and silently skips it otherwise; only Responses mode needs the agent to read it back.
 
 1. Install and serve the broker from [https://github.com/yw0nam/tts_express_broker](https://github.com/yw0nam/tts_express_broker).
 2. The broker listens by default at `http://localhost:3201/mcp` (streamable-http MCP).
@@ -134,14 +138,19 @@ The broker publishes YUI's renderable emotion/motion/`emotion_text` vocabulary s
 
 ## 5. TTS — Voice Output (optional)
 
-Without TTS, YUI displays text in the speech bubble but produces no audio. Any server implementing the OpenAI `/v1/audio/speech` endpoint works.
+Without TTS, YUI displays text in the speech bubble but produces no audio. `tts_provider` names the engine at `tts_base_url`: `irodori` (the shipped default), `openai`, or `fish`. Each provider has its own endpoint shape and decides how the cue's `emotion_text` and `caption` ride in the request and where the voice list comes from. The **Provider** select in the Connection tab's TTS section sets the provider and fills in its server URL and default model.
 
-The reference deployment is [Irodori TTS Server](https://github.com/Aratako/Irodori-TTS-Server) — it also understands the emoji `emotion_text` tags inline in the spoken text. Follow that repo's README to run it (default port 8088).
+If the server requires auth, set `VITE_YUI_TTS_KEY` in `.env.local`. YUI sends it as `Authorization: Bearer`. Like all key fallbacks this applies to dev runs only; a release build reads the key entered in the Connection tab.
+
+### Irodori
+
+[Irodori TTS Server](https://github.com/Aratako/Irodori-TTS-Server) is the reference deployment. Follow that repo's README to run it (default port 8088). YUI prepends the emoji `emotion_text` tag to the spoken text and sends `caption` as `irodori.caption`.
 
 **Caveat: Irodori serves Japanese only.** When using it, instruct your backend agent to respond in Japanese.
 
 In `configs/endpoints.json`:
 ```json
+"tts_provider": "irodori",
 "tts_base_url": "http://localhost:8088",
 "tts_model": "irodori-tts",
 "tts_speaker": "<voice-id>"
@@ -149,9 +158,25 @@ In `configs/endpoints.json`:
 
 `tts_model` must match the name the server is configured under, or the server answers 400.
 
-The TTS server is the source of truth for the available voice IDs (`GET /v1/audio/voices`) — YUI ships no bundled catalog. The panel's voice section lists them; `tts_speaker` picks the one used until you choose another there. Voices live in the server's `voices/` directory, and the panel uploads imported reference clips with `POST`/`PUT /v1/audio/voices` and removes them with `DELETE /v1/audio/voices/{voice_id}`.
+The TTS server is the source of truth for the available voice IDs (`GET /v1/audio/voices`), and YUI ships no bundled catalog. The panel's voice section lists them; `tts_speaker` picks the one used until you choose another there. Voices live in the server's `voices/` directory, and the panel uploads imported reference clips with `POST`/`PUT /v1/audio/voices` and removes them with `DELETE /v1/audio/voices/{voice_id}`. When the server lists no voice a local clip was imported under, the voice list refresh uploads that clip again.
 
-If the server requires auth, set `VITE_YUI_TTS_KEY` in `.env.local` — YUI sends it as `Authorization: Bearer`.
+### OpenAI
+
+1. Create a key at [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+2. In the Connection tab's TTS section, pick **OpenAI** as the provider. The server URL becomes `https://api.openai.com` and the model `gpt-4o-mini-tts`.
+3. Paste the key into the TTS API key field.
+
+The voice section lists OpenAI's 13 built-in voices: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`. Importing, deleting, and re-uploading voices is off for this provider. YUI sends the spoken text as `input` and joins `emotion_text` and `caption` into `instructions`. The `tts-1` and `tts-1-hd` models ignore `instructions` and speak only `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, and `shimmer`.
+
+### Fish
+
+Fish Audio is a hosted service. Sign in at [https://fish.audio/](https://fish.audio/), create an API key, pick **Fish Audio** as the provider in the Connection tab's TTS section (the server URL becomes `https://api.fish.audio` and the model `s2.1-pro-free`), and paste the key into the TTS API key field.
+
+The model field takes any S2-family model id (`s2-pro`, `s2.1-pro`, `s2.1-pro-free`, `drama-3-preview`); an unknown id falls back to `s2.1-pro` on Fish's side.
+
+The voice section lists the models in your Fish account (`GET /model?self=true`) by their titles. Importing an audio file uploads it as a new voice model (`POST /model`, fast training) and selects the model Fish creates; deleting a voice removes the model from your account. A voice from Fish's public library that is not in your list can still be used: paste its voice id, or its voice page URL such as `https://fish.audio/m/<id>`, into the field under the voice list and it becomes the active voice. Deleting a pasted voice only takes it off the list. Imported and pasted voices belong to the provider they were added under, so they are listed only while that provider is selected.
+
+YUI sends the spoken text as `text` to `POST <tts_base_url>/v1/tts` and the model as a `model` HTTP header. `emotion_text` and `caption` each ride as their own `[...]` bracket ahead of the sentence (S2 inline direction).
 
 ---
 
@@ -164,13 +189,13 @@ Serve any OpenAI-compatible transcription server at the configured URL, then set
 "stt_base_url": "http://localhost:5517/v1"
 ```
 
-YUI sends audio to `<stt_base_url>/audio/transcriptions`. If the server requires auth, set `VITE_YUI_STT_KEY` in `.env.local` — YUI sends it as `Authorization: Bearer`.
+YUI sends audio to `<stt_base_url>/audio/transcriptions`. If the server requires auth, set `VITE_YUI_STT_KEY` in `.env.local` (dev runs; a release build reads the key entered in the Connection tab) — YUI sends it as `Authorization: Bearer`. A hosted API such as Groq also needs a model: set `stt_model` in `configs/endpoints.json` (for example `"stt_model": "whisper-large-v3-turbo"`) or in the Connection tab's STT model field, which overrides the file.
 
 ---
 
 ## 7. Wire It All Together — `configs/endpoints.json`
 
-YUI ships with no service addresses: every URL in the bundled `configs/endpoints.json` is unset, and an unset URL means that feature is off — STT, TTS, and the expression broker stay quiet, and a chat turn with no `chat_base_url` answers with an inline "Backend not configured" error pointing at **Advanced**.
+YUI ships with no service addresses: every URL in the bundled `configs/endpoints.json` is unset, and an unset URL means that feature is off — STT, TTS, and the expression broker stay quiet, and a chat turn with no `chat_base_url` answers with an inline "Backend not configured" error pointing at **Connection**.
 
 Point YUI at your services by editing `configs/endpoints.json` or using the in-app Endpoint settings panel, which persists overrides to local storage and leaves the bundled file untouched.
 
@@ -178,14 +203,16 @@ Key reference:
 
 | Key | Shipped default | Purpose |
 |---|---|---|
-| `chat_api` | `chat_completions` | Chat protocol: `"chat_completions"` (client-declared `generate_express`, any tool-calling endpoint) or `"responses"` (backend agent honoring the expression contract) |
-| `chat_base_url` | unset | API root including `/v1`; the client appends `/chat/completions` or `/responses` per `chat_api` |
+| `chat_api` | `chat_completions` | Chat protocol: `"chat_completions"` (client-declared `generate_express`, any tool-calling endpoint), `"responses"` (backend agent honoring the expression contract), or `"push"` (one WebSocket, see [push transport](../reference/push-transport.md)) |
+| `chat_base_url` | unset | In `chat_completions` and `responses` modes, the API root including `/v1`, to which the client appends `/chat/completions` or `/responses`. In push mode, the WebSocket base without `/v1`, where the client opens `<chat_base_url>/ws` |
 | `chat_model` | unset | Model ID sent to the backend |
 | `chat_model_context_window` | `200000` | Token window — display in Responses mode; also trims the client-side transcript in Chat Completions mode |
 | `chat_instructions` | expression prompt | System-level nudge on how to use `generate_express`; sent as `instructions` (Responses) or a system message (Chat Completions) |
 | `stt_base_url` | unset | STT server base URL |
-| `tts_base_url` | unset | OpenAI-compatible TTS server |
-| `tts_model` | `irodori-tts` | `model` sent to the TTS server; must match its configured name |
+| `stt_model` | unset | `model` sent to the STT server; omitted when unset |
+| `tts_provider` | `irodori` | TTS engine at `tts_base_url`: `irodori`, `openai`, or `fish` |
+| `tts_base_url` | unset | TTS server root without `/v1` |
+| `tts_model` | `irodori-tts` | Model sent to the TTS server — Irodori/OpenAI as the request's `model` field (must match the server's configured name), Fish as a `model` HTTP header (an S2-family id) |
 | `tts_speaker` | unset | Default voice id, until another is picked in the panel |
 | `tts_max_inflight` | `1` | Concurrent TTS synthesis requests |
 | `broker_base_url` | unset | Expression broker MCP URL |

@@ -1,7 +1,7 @@
 /** The stage's camera wiring — wheel zoom, persisted camera/throttle flow, and the feet-follow input anchor. */
 
 import type { Renderer } from "../../renderer";
-import { nextZoom } from "../../renderer/geometry/camera-fit";
+import { nextZoom } from "../../renderer/camera/camera-fit";
 import {
   CAMERA_WHEEL_SENSITIVITY,
   CAMERA_ZOOM_MAX,
@@ -23,7 +23,7 @@ export function wireCamera(deps: {
   idleThrottleSettings: Pick<SettingsStores["idleThrottleSettings"], "get" | "subscribe">;
 }): () => void {
   // Character scale via mouse wheel: clamp bounds and sensitivity are io constants, persist is owned by store.
-  // Drag uses pointerdown only, so no conflict with wheel (drag.ts).
+  // Drag uses pointerdown only, so no conflict with wheel (gesture/window-drag.ts).
   const onWheelZoom = (e: WheelEvent): void => {
     if (e.ctrlKey) return; // ctrl+wheel is window-resize gesture (window-resize-source).
     e.preventDefault();

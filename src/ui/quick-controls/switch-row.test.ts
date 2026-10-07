@@ -6,8 +6,8 @@ import { createMessageWindowSettings } from "../../settings/panels/message-windo
 import { createFlagSettings } from "../../settings/persisted-store";
 import { createFillerSettings } from "../../settings/voice/filler-settings";
 import { createVadSettings } from "../../settings/voice/vad-settings";
-import { reflectSwitchRows } from "./reflect";
 import { createSwitchRows, type SwitchRow } from "./switch-row";
+import { reflectSwitchRows } from "./switches/switch-rows";
 import { buildPanelHtml } from "./template";
 
 function makeSwitchRows(): SwitchRow[] {
@@ -39,20 +39,15 @@ function render(switchRows: readonly SwitchRow[]): HTMLElement {
   root.innerHTML = buildPanelHtml({
     isWindow: false,
     hasSession: false,
-    showSessionReset: false,
-    showViewpoint: false,
-    showIdleMotion: false,
-    showExpressMotion: false,
     switchRows,
     showScreen: true,
     showPresence: false,
     showPacerGap: false,
     showRateLimits: false,
     showDevtools: false,
+    showHelp: false,
     showMessage: false,
     showHistory: false,
-    railCollapsed: false,
-    closedSections: new Set(),
   });
   return root;
 }

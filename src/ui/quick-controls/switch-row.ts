@@ -12,7 +12,7 @@ export interface SwitchRow {
   labelKey: string;
   subKey?: string;
   ariaKey: string;
-  tab: "talk" | "input" | "react" | "advanced";
+  tab: "talk" | "input" | "react" | "general";
   position?: "after-vad" | "filler" | "screen";
   accessory?: "agent-port";
   labelIcon?: string;
@@ -22,6 +22,8 @@ export interface SwitchRow {
   getEnabled: () => boolean;
   setEnabled: (value: boolean) => void;
   logKey?: string;
+  /** Follows the row's store, for a store that feeds nothing else on the panel. */
+  subscribe?: (onChange: () => void) => () => void;
 }
 
 type VadSettingsStore = ReturnType<typeof createVadSettings>;
@@ -41,6 +43,25 @@ interface SwitchRowOptions {
   messageWindowSettings?: MessageWindowSettingsStore;
   screenSettings?: FlagSettingsStore;
   screenKnobSettings?: ScreenKnobSettingsStore;
+}
+
+/** The speech bubble's keep-until-dismissed row; the phone's General tab renders it on its own. */
+export function createBubblePersistRow(bubblePersistSettings?: FlagSettingsStore): SwitchRow {
+  return {
+    selector: ".yui-bubble-persist-switch",
+    labelKey: "bubble_persist.label",
+    subKey: "bubble_persist.sub",
+    ariaKey: "bubble_persist.aria",
+    tab: "input",
+    position: "after-vad",
+    isVisible: !!bubblePersistSettings,
+    isAvailable: !!bubblePersistSettings,
+    initialEnabled: bubblePersistSettings?.get().enabled ?? false,
+    getEnabled: () => bubblePersistSettings!.get().enabled,
+    setEnabled: (v) => bubblePersistSettings!.setEnabled(v),
+    logKey: "bubble_persist_toggle",
+    subscribe: bubblePersistSettings ? (cb) => bubblePersistSettings.subscribe(cb) : undefined,
+  };
 }
 
 export function createSwitchRows({
@@ -79,13 +100,14 @@ export function createSwitchRows({
       labelKey: "perf.idle_label",
       subKey: "perf.idle_sub",
       ariaKey: "perf.idle_aria",
-      tab: "advanced",
+      tab: "general",
       isVisible: true,
       isAvailable: true,
       initialEnabled: false,
       getEnabled: () => idleThrottleSettings.get().enabled,
       setEnabled: (v) => idleThrottleSettings.setEnabled(v),
       logKey: "idle_throttle_toggle",
+      subscribe: (cb) => idleThrottleSettings.subscribe(cb),
     },
     {
       selector: ".yui-tts-switch",
@@ -94,9 +116,9 @@ export function createSwitchRows({
       ariaKey: "tts_output.aria",
       tab: "input",
       labelIcon: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-  <rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/>
-  <path d="M9 10l2.5 2.5L15 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M4 9h2M18 9h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  <rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
+  <path d="M9 10l2.5 2.5L15 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4 9h2M18 9h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 </svg>`,
       isVisible: true,
       isAvailable: !!ttsSettings,
@@ -104,6 +126,7 @@ export function createSwitchRows({
       getEnabled: () => ttsSettings!.get().enabled,
       setEnabled: (v) => ttsSettings!.setEnabled(v),
       logKey: "tts_output_toggle",
+      subscribe: ttsSettings ? (cb) => ttsSettings.subscribe(cb) : undefined,
     },
     {
       selector: ".yui-bargein-switch",
@@ -118,20 +141,7 @@ export function createSwitchRows({
       setEnabled: (v) => vad.setBargeIn(v),
       logKey: "bargein_toggle",
     },
-    {
-      selector: ".yui-bubble-persist-switch",
-      labelKey: "bubble_persist.label",
-      subKey: "bubble_persist.sub",
-      ariaKey: "bubble_persist.aria",
-      tab: "input",
-      position: "after-vad",
-      isVisible: !!bubblePersistSettings,
-      isAvailable: !!bubblePersistSettings,
-      initialEnabled: bubblePersistSettings?.get().enabled ?? false,
-      getEnabled: () => bubblePersistSettings!.get().enabled,
-      setEnabled: (v) => bubblePersistSettings!.setEnabled(v),
-      logKey: "bubble_persist_toggle",
-    },
+    createBubblePersistRow(bubblePersistSettings),
     {
       selector: ".yui-message-window-switch",
       labelKey: "message_window.label",
@@ -146,45 +156,49 @@ export function createSwitchRows({
       getEnabled: () => messageWindowSettings!.get().mode === "popped",
       setEnabled: (v) => messageWindowSettings!.setMode(v ? "popped" : "docked"),
       logKey: "message_window_toggle",
+      subscribe: messageWindowSettings ? (cb) => messageWindowSettings.subscribe(cb) : undefined,
     },
     {
       selector: ".yui-gaze-switch",
       labelKey: "gaze.label",
       subKey: "gaze.sub",
       ariaKey: "gaze.aria",
-      tab: "advanced",
+      tab: "general",
       isVisible: !!gazeSettings,
       isAvailable: !!gazeSettings,
       initialEnabled: gazeSettings?.get().enabled ?? false,
       getEnabled: () => gazeSettings!.get().enabled,
       setEnabled: (v) => gazeSettings!.setEnabled(v),
       logKey: "gaze_toggle",
+      subscribe: gazeSettings ? (cb) => gazeSettings.subscribe(cb) : undefined,
     },
     {
       selector: ".yui-climb-switch",
       labelKey: "climb.label",
       subKey: "climb.sub",
       ariaKey: "climb.aria",
-      tab: "advanced",
+      tab: "general",
       isVisible: !!climbSettings,
       isAvailable: !!climbSettings,
       initialEnabled: climbSettings?.get().enabled ?? true,
       getEnabled: () => climbSettings!.get().enabled,
       setEnabled: (v) => climbSettings!.setEnabled(v),
       logKey: "climb_toggle",
+      subscribe: climbSettings ? (cb) => climbSettings.subscribe(cb) : undefined,
     },
     {
       selector: ".yui-fall-switch",
       labelKey: "fall.label",
       subKey: "fall.sub",
       ariaKey: "fall.aria",
-      tab: "advanced",
+      tab: "general",
       isVisible: !!fallSettings,
       isAvailable: !!fallSettings,
       initialEnabled: fallSettings?.get().enabled ?? true,
       getEnabled: () => fallSettings!.get().enabled,
       setEnabled: (v) => fallSettings!.setEnabled(v),
       logKey: "fall_toggle",
+      subscribe: fallSettings ? (cb) => fallSettings.subscribe(cb) : undefined,
     },
     {
       selector: ".yui-agentnotify-switch",

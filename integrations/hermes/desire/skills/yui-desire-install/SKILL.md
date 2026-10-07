@@ -42,7 +42,8 @@ ln -sfn $YUI/integrations/hermes/desire ~/.hermes/plugins/yui-desire
 hermes -p <profile> plugins enable yui-desire
 ```
 
-Check: `hermes -p <profile> plugins list` shows `yui-desire` enabled. Do not grant the plugin built-in tool
+Check: `hermes -p <profile> plugins list` shows `yui-desire` enabled. The list is configuration state only and does not
+prove the plugin loaded; the load check is step 9, after the gateway restarts. Do not grant the plugin built-in tool
 override permission; the middleware needs none.
 
 ## 3. Environment
@@ -79,7 +80,7 @@ chmod +x ~/.hermes/scripts/<agent>-desire-monitor.sh
 ```
 
 Check: the last command prints one summary line (for example
-`social:low curiosity:mid accomplishment:mid outbox:0 transport:up budget:3/3sig 2/2iss 1/1cmt 1/1pr day:2026-09-01 rises:0 starved:0/0/0`).
+`social:low curiosity:mid accomplishment:mid outbox:0 transport:up budget:3/3sig 2/2iss 1/1cmt 0/0pr day:2026-09-01 rises:0 starved:0/0/0`).
 The monitor checks transport with an HTTP GET to `YUI_SIGNALS_URL`; any HTTP response counts as up. The
 monitor's fail-safe fallback prints the same shape with `transport:down`, so a `down` line proves nothing on its
 own. The real check is the state directory it bootstraps:
@@ -166,7 +167,7 @@ Check: `wants.md` exists and lists the wants.
 ## 8. Verify injection
 
 Send yourself a normal YUI user-message turn, then confirm the middleware ran. With `logging.level: DEBUG` in the
-profile `config.yaml`, `~/.hermes/logs/agent.log` gains one line per pass:
+profile `config.yaml`, `~/.hermes/profiles/<profile>/logs/agent.log` gains one line per pass:
 
 ```
 yui-desire llm_request plugin=yui-desire/0.1.0 outcome=injected reason=None interaction=True trigger=user message platform=… shape=messages/str cache_hit=False api_request_id=… turn_id=… session_id=…
@@ -178,7 +179,7 @@ The line never contains the desire block, drive levels, want text, or user conte
 
 ## 9. Gateway restart (plugin code changed)
 
-The gateway process imports the middleware, so a pull that touches `__init__.py` or `desire_state.py` takes effect
+The gateway process imports the middleware, so a pull that touches `__init__.py` or any `desire_*.py` module takes effect
 only after a restart. Prompts, the monitor script, and `act.py` run as subprocesses and need none. The restart ends
 every running turn, including the one that issues it, so answer first and issue it detached:
 
@@ -186,13 +187,17 @@ every running turn, including the one that issues it, so answer first and issue 
 setsid nohup sh -c 'sleep 30; hermes -p <profile> gateway restart' >/dev/null 2>&1 &
 ```
 
-Check: `~/.hermes/profiles/<profile>/logs/gateway.log` gains `api_server connected` after the restart.
+Check: `~/.hermes/profiles/<profile>/logs/gateway.log` gains `api_server connected` after the restart. Then compare the last
+failure line with the time of the restart:
+`grep -n "Failed to load plugin 'yui-desire'" ~/.hermes/profiles/<profile>/logs/agent.log | tail -1`.
+A line dated after the restart means the load failed, and the reason follows the colon. With `HERMES_PLUGINS_DEBUG=1` set
+as an environment variable of the process that runs the gateway, the traceback follows the warning.
 
 ## Helper commands
 
 `python3 $YUI/integrations/hermes/desire/act.py --help` lists the actions the prompts use: `signal`, `issue`,
-`comment`, `pr`, `dispatch`, `report`, `satisfy`, `feedback`, `outbox`. Daily caps, reset at KST midnight: three
-signals, two issues, one self-initiated comment, one pull request, one dispatch, and the four satisfaction events
+`comment`, `pr`, `report`, `satisfy`, `feedback`, `outbox`. Daily caps, reset at KST midnight: three signals, two
+issues, one self-initiated comment, zero pull requests (the agent opens none), and the four satisfaction events
 (`learned` 6, `progressed` 6, `shipped` 4, `praised` 4 — see the README's Action budgets table for their drive
 doses). `satisfy` accepts `learned` and `praised`; the monitor derives the other two. `report --note` carries the
 daily report to YUI and has no budget; `report --skills` prints the load counts of the skills the agent made and

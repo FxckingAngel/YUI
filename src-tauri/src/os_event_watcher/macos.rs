@@ -1,11 +1,8 @@
 //! macOS OS polling — idle (CGEventSource FFI), window enumeration
 //! (CGWindowList raw FFI), camera best-effort.
 
-#![allow(dead_code)] // CFBooleanRef + related bindings are unused FFI bindings
-
-use super::{idle_ms_from_secs, polling_loop, WindowAtPoint};
-use std::{ffi::c_void, thread};
-use tauri::AppHandle;
+use super::{pure_helpers::idle_ms_from_secs, WindowAtPoint};
+use std::ffi::c_void;
 
 // ─── Raw Core Foundation + Core Graphics FFI ─────────────────────────────────
 
@@ -14,7 +11,6 @@ type CFArrayRef = *const c_void;
 type CFDictionaryRef = *const c_void;
 type CFStringRef = *const c_void;
 type CFNumberRef = *const c_void;
-type CFBooleanRef = *const c_void;
 type CFIndex = isize;
 type CGWindowID = u32;
 type CGWindowListOption = u32;
@@ -23,7 +19,6 @@ const K_CG_NULL_WINDOW_ID: CGWindowID = 0;
 const K_CG_WINDOW_LIST_OPTION_ON_SCREEN_ONLY: CGWindowListOption = 1 << 0;
 
 #[repr(i32)]
-#[allow(dead_code)]
 enum CFNumberType {
     Int64 = 4,
     Int32 = 9,
@@ -58,10 +53,7 @@ extern "C" {
         bufferSize: CFIndex,
         encoding: u32,
     ) -> bool;
-    fn CFBooleanGetValue(boolean: CFBooleanRef) -> bool;
     fn CFRelease(cf: CFTypeRef);
-
-    static kCFBooleanTrue: CFBooleanRef;
 }
 
 // Static CGWindowList property keys (declared in CoreGraphics).
@@ -73,7 +65,6 @@ extern "C" {
     static kCGWindowName: CFStringRef;
     static kCGWindowLayer: CFStringRef;
     static kCGWindowBounds: CFStringRef;
-    static kCGWindowIsOnscreen: CFStringRef;
 }
 
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
@@ -210,13 +201,6 @@ pub struct ScreenRect {
     pub y: f64,
     pub width: f64,
     pub height: f64,
-}
-
-impl ScreenRect {
-    /// Half-open containment: left/top inclusive, right/bottom exclusive.
-    fn contains(&self, px: f64, py: f64) -> bool {
-        px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
-    }
 }
 
 /// One enumerated on-screen window: rect (points), owner pid/name, optional window name.
@@ -407,19 +391,10 @@ pub(super) fn platform_idle_ms() -> Option<u64> {
 
 /// Owner app and title of the frontmost user window, `(None, None)` when none.
 pub(super) fn platform_frontmost() -> (Option<String>, Option<String>) {
-    match super::first_user_window(list_all_windows(), process_base_name) {
+    match super::pure_helpers::first_user_window(list_all_windows(), process_base_name) {
         Some(w) => (w.owner_name, w.name),
         None => (None, None),
     }
-}
-
-// ─── Background polling loop ──────────────────────────────────────────────────
-
-pub fn start_polling(app: AppHandle) {
-    thread::Builder::new()
-        .name("os_event_watcher".into())
-        .spawn(move || polling_loop(app))
-        .expect("failed to spawn os_event_watcher thread");
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -525,19 +500,5 @@ mod tests {
     fn process_base_name_rejects_an_unreadable_pid() {
         assert_eq!(process_base_name(0), None);
         assert_eq!(process_base_name(-1), None);
-    }
-
-    #[test]
-    fn rect_contains_is_half_open() {
-        let r = ScreenRect {
-            x: 10.0,
-            y: 20.0,
-            width: 30.0,
-            height: 40.0,
-        };
-        assert!(r.contains(10.0, 20.0)); // top-left inclusive
-        assert!(!r.contains(40.0, 20.0)); // right edge exclusive (x + w)
-        assert!(!r.contains(10.0, 60.0)); // bottom edge exclusive (y + h)
-        assert!(r.contains(39.9, 59.9)); // just inside
     }
 }

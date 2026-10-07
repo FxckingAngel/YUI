@@ -19,6 +19,7 @@ interface TestOption {
   label?: string;
   source?: "bundled" | "user";
   url: string;
+  owner?: string;
 }
 
 const SAMPLE: TestOption[] = [
@@ -36,7 +37,8 @@ function coerceUser(v: unknown): TestOption | null {
   if (typeof o.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(o.id)) return null;
   if (typeof o.url !== "string" || o.url.length === 0) return null;
   const label = typeof o.label === "string" && o.label.length > 0 ? o.label : o.id;
-  return { id: o.id, label, url: o.url, source: "user" };
+  const owner = typeof o.owner === "string" ? { owner: o.owner } : {};
+  return { id: o.id, label, url: o.url, source: "user", ...owner };
 }
 
 function isDefault(o: TestOption, defaultValue: string): boolean {
@@ -176,6 +178,101 @@ describe("createSelectionStore", () => {
     expect(store.getActiveId()).toBe("mine");
   });
 
+  it("keeps another owner's user option whose id a listed option also uses, through a reload and a later save", () => {
+    const userStorage = makeMemUserStorage();
+    const store = createSelectionStore<TestOption>({
+      defaultValue: "",
+      userStorage,
+      synthesize,
+      coerceUser,
+      isDefault,
+      ownerKey: "owner",
+      owner: "b",
+    });
+    store.setManifest({
+      available: [{ id: "alloy", label: "alloy", url: "", source: "bundled" }],
+      defaultValue: "",
+    });
+    // Another window wrote both of owner a's imports to storage.
+    userStorage._data = [
+      { id: "alloy", label: "Mine", url: "asset://alloy.res", owner: "a" },
+      { id: "other", label: "Other", url: "asset://other.res", owner: "a" },
+    ];
+
+    store.reloadFromStorage();
+    store.renameUserOption("other", "Renamed");
+
+    expect(userStorage._data.map((o) => o.id)).toEqual(["alloy", "other"]);
+  });
+
+  // The owner decides which user options list() returns, so a new owner is a list change even
+  // when the active id stays put.
+  it("notifies on a move to a new owner with the active id unchanged, and not on the same owner", () => {
+    const store = createSelectionStore<TestOption>({
+      available: SAMPLE,
+      defaultValue: "/a.res",
+      synthesize,
+      coerceUser,
+      isDefault,
+      ownerKey: "owner",
+      owner: "x",
+    });
+    const cb = vi.fn();
+    store.subscribe(cb);
+
+    store.setOwner("y");
+    expect(store.getActiveId()).toBe("a");
+    expect(cb).toHaveBeenCalledOnce();
+
+    store.setOwner("y");
+    expect(cb).toHaveBeenCalledOnce();
+  });
+
+  it("lists and resolves only the active owner's user options, and restores the selection when its owner returns", () => {
+    const store = createSelectionStore<TestOption>({
+      available: SAMPLE,
+      defaultValue: "/a.res",
+      synthesize,
+      coerceUser,
+      isDefault,
+      ownerKey: "owner",
+      owner: "x",
+    });
+    store.addUserOption({ id: "mine", url: "asset://mine.res" });
+    store.select("mine");
+    expect(store.listUser()).toEqual([
+      { id: "mine", url: "asset://mine.res", source: "user", owner: "x" },
+    ]);
+
+    store.setOwner("y");
+    expect(store.list().map((o) => o.id)).toEqual(["a", "b"]);
+    expect(store.getActiveId()).toBe("a");
+    store.select("mine");
+    expect(store.getActiveId()).toBe("a");
+
+    store.setOwner("x");
+    expect(store.getActiveId()).toBe("mine");
+  });
+
+  it("refuses a user option whose id another owner's user option holds", () => {
+    const store = createSelectionStore<TestOption>({
+      defaultValue: "",
+      synthesize,
+      coerceUser,
+      isDefault,
+      ownerKey: "owner",
+      owner: "x",
+    });
+    store.addUserOption({ id: "mine", url: "asset://mine.res" });
+    store.setOwner("y");
+
+    store.addUserOption({ id: "mine", url: "asset://other.res" });
+
+    expect(store.listUser()).toEqual([
+      { id: "mine", url: "asset://mine.res", source: "user", owner: "x" },
+    ]);
+  });
+
   // A user option wiped from memory by a setManifest bundled-id collision is not lost: the
   // persisted record survives (setManifest never writes userStorage), so once a later manifest
   // no longer collides, reloadFromStorage's mergeUserOptions picks it back up unassisted.
@@ -258,7 +355,6 @@ describe("createSelectionStore", () => {
     const store = makeStore({ storage });
     expect(() => store.getActiveId()).not.toThrow();
     expect(store.getActiveId()).toBe("a");
-    store.reset();
     expect(storage.save).not.toHaveBeenCalled();
   });
 
@@ -280,7 +376,7 @@ describe("createSelectionStore", () => {
     expect(store.getActive().label).toBe("B");
   });
 
-  it("selects and resets valid ids, persisting and notifying only on actual changes", () => {
+  it("selects valid ids, persisting and notifying only on actual changes", () => {
     const storage = makeMemStorage();
     const store = makeStore({ storage });
     const cb = vi.fn();
@@ -295,12 +391,6 @@ describe("createSelectionStore", () => {
     store.select("b");
     expect(storage._data).toBe("b");
     expect(cb).toHaveBeenCalledTimes(1);
-
-    store.reset();
-    store.reset();
-    expect(storage._data).toBeNull();
-    expect(store.getActiveId()).toBe("a");
-    expect(cb).toHaveBeenCalledTimes(2);
   });
 
   it("reloads an external reset and preserves state when override storage throws", () => {

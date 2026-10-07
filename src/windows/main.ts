@@ -9,26 +9,33 @@
  *   io: streamChat(SSE) → express + text stream → renderer / surfaces / tts-pipeline.
  *
  *   - .yui-stage: transparent character stage (drag region). renderer fills with canvas.
- *   - .yui-ui:    overlay — speech bubble, tool state, text input (invisible-by-default).
+ *   - .yui-status: status pill — capture, voice, and tool state (invisible-by-default).
+ *   - .yui-ui:    overlay — speech bubble, text input (invisible-by-default).
  */
 
 import "../styles.css";
-import { createTier1Engine } from "../ambient/liveliness/tier1";
 import { createConfiguredBootstrap } from "../app/bootstrap-configured";
-import { registerRendererAndAmbientDisposal } from "../app/bootstrap-disposal";
+import { wireHelpGuide } from "../app/controls/wire-help-guide";
 import { wirePetControls } from "../app/controls/wire-pet-controls";
-import { wireCrossWindowSync, wireDevGlobals } from "../app/cross-window/wire-cross-window";
+import { wireCrossWindowSync } from "../app/cross-window/wire-cross-window";
 import { wireSettingsReload } from "../app/cross-window/wire-window-sync";
+import { wireDevGlobals } from "../app/dev/wire-dev-globals";
 import { createDisposers } from "../app/disposers";
-import { createConversationStores } from "../app/settings/conversation-stores";
-import { wireSpeakerSelection, wireVrmSelection } from "../app/settings/wire-avatar";
+import { createWindowStores } from "../app/settings/window-stores";
+import { wireAvatarSelection } from "../app/settings/wire-avatar";
 import { createPetConfig, wireConfigReload, wireConfigWatch } from "../app/settings/wire-config";
-import { wireCamera, wireInputAnchor } from "../app/stage/wire-pet-stage";
-import { createDelegationChipMount, wirePushMode, wirePushStores } from "../app/turn/wire-push";
-import { CHAT_API_KEY_SECRET, TTS_API_KEY_SECRET } from "../config/load";
+import { createStageRenderer } from "../app/stage/stage-renderer";
+import { wireInputAnchor } from "../app/stage/wire-pet-stage";
+import {
+  createDelegationChipMount,
+  messageWindowSuppression,
+} from "../app/turn/push/delegation-chip-mount";
+import { createPushStores, publishPushStores } from "../app/turn/push/push-stores";
+import { wirePushMode } from "../app/turn/push/wire-push";
+import { createVoiceFix } from "../app/voice/voice-fix";
+import { CHAT_API_KEY_SECRET, TTS_API_KEY_SECRET } from "../config/secrets";
 import { createEventBus } from "../dispatcher/core/event-bus";
 import { createUserInputSource } from "../dispatcher/sources/user-input-source";
-import { wireVoiceListAutoRefresh } from "../io/voice/voices/voice-list-refresh";
 import {
   resolveScreenCapturer,
   resolveScreenSourceProvider,
@@ -37,10 +44,8 @@ import { createDevtoolsWindowOpener } from "../io/window/openers/devtools-window
 import { createSettingsWindowOpener } from "../io/window/openers/settings-window";
 import { excludeOwnOriginFromCorsFetch } from "../io/window/own-origin-fetch";
 import { createLogger, initLogger } from "../logger";
-import { createRenderer } from "../renderer";
-import { createSettingsStores } from "../settings/settings-stores";
+import { createStatusPill } from "../ui/chips/status-pill";
 import { createVoiceInputStatus } from "../ui/chips/voice-input-status";
-import { getLocale } from "../ui/i18n";
 import { showBootError } from "../ui/notices/boot-error";
 import { attachSummonKey } from "../ui/surfaces/summon-key";
 import { wireMessageSurfaces } from "../ui/surfaces/wire";
@@ -80,45 +85,29 @@ async function bootstrap(): Promise<BootstrapHandle> {
   const root = app.querySelector<HTMLDivElement>(".yui-root")!;
   const stage = root.querySelector<HTMLDivElement>(".yui-stage")!;
 
-  const settingsStores = createSettingsStores({ locale: getLocale() });
-  // Every store in the bag shares the same lifecycle, so teardown iterates the bag itself:
-  // a store added to createSettingsStores is disposed without touching this loop.
-  for (const store of Object.values(settingsStores)) {
-    register(() => store.dispose());
-  }
-
-  const conversationStores = createConversationStores();
-  for (const store of Object.values(conversationStores)) {
-    register(() => store.dispose());
-  }
-
-  const petConfig = createPetConfig({
-    endpointsSettings: settingsStores.endpointsSettings,
-    guardrailsSettings: settingsStores.guardrailsSettings,
-    chatKeySettings: settingsStores.chatKeySettings,
-    sttKeySettings: settingsStores.sttKeySettings,
-    ttsKeySettings: settingsStores.ttsKeySettings,
-    log,
-  });
+  const { settingsStores, conversationStores } = createWindowStores(register);
+  const petConfig = createPetConfig({ ...settingsStores, log });
   const config = petConfig.config;
+  const { renderer, ambient } = createStageRenderer({ stage, settings: settingsStores, register });
 
-  const renderer = createRenderer({ mount: stage });
-  register(
-    wireCamera({
-      stage,
-      renderer,
-      cameraSettings: settingsStores.cameraSettings,
-      idleThrottleSettings: settingsStores.idleThrottleSettings,
+  const voiceInputStatus = createVoiceInputStatus();
+  register(() => voiceInputStatus.dispose());
+  // Tool tells stay with the character in both window modes, so the pill backs the local surfaces.
+  const statusPill = createStatusPill({
+    mount: root,
+    settings: settingsStores.screenshotSettings,
+    voice: voiceInputStatus,
+    onOpenSettings: () => controls.get().open(),
+    onFixVoice: createVoiceFix({
+      openConnection: () => controls.get().open(undefined, { tab: "conn" }),
+      status: voiceInputStatus,
     }),
-  );
-  // Tier 1 ambient: backend-independent, always on. tick fires after VRM loads, so
-  // starting before loadVRM is safe (frames without VRM are no-op).
-  const ambient = createTier1Engine(renderer);
-  ambient.start();
-  registerRendererAndAmbientDisposal(register, renderer, ambient);
+  });
+  register(() => statusPill.dispose());
 
   const { surfaces, local, remote, getMode } = wireMessageSurfaces({
     mount: root,
+    tool: statusPill,
     bubblePersistSettings: settingsStores.bubblePersistSettings,
     messageWindowSettings: settingsStores.messageWindowSettings,
     register,
@@ -131,8 +120,6 @@ async function bootstrap(): Promise<BootstrapHandle> {
     }),
   );
 
-  const voiceInputStatus = createVoiceInputStatus();
-  register(() => voiceInputStatus.dispose());
   const screenSourceProvider = resolveScreenSourceProvider();
   const screenCapturer = resolveScreenCapturer();
   // Pop-out: Tauri uses separate WebviewWindow("settings"), otherwise browser window. Wire storage events
@@ -154,30 +141,19 @@ async function bootstrap(): Promise<BootstrapHandle> {
     log,
   });
   register(() => disposeCrossWindowSync());
-  const vrm = wireVrmSelection({
+  const { vrm, speaker } = wireAvatarSelection({
     renderer,
+    getEndpoints: petConfig.getEndpoints,
+    getTtsKey: () => config.secrets.get(TTS_API_KEY_SECRET),
+    endpointsSettings: settingsStores.endpointsSettings,
+    ttsKeySettings: settingsStores.ttsKeySettings,
+    config,
     log,
     broadcastSettings,
+    register,
   });
   const { vrmSelection, loadVrmSerialized } = vrm;
-  register(() => vrmSelection.dispose());
-
-  const speaker = wireSpeakerSelection({
-    getEndpoints: petConfig.getEndpoints,
-    getApiKey: () => config.secrets.get(TTS_API_KEY_SECRET),
-    log,
-    broadcastSettings,
-  });
-  const { speakerSelection, refreshVoiceList } = speaker;
-  register(() => speakerSelection.dispose());
-  // Config-file edits refresh via onConfigChange below; this covers the panel's override commits.
-  register(
-    wireVoiceListAutoRefresh({
-      subscribe: settingsStores.endpointsSettings.subscribe,
-      getEndpoints: petConfig.getEndpoints,
-      refresh: refreshVoiceList,
-    }),
-  );
+  const { speakerSelection } = speaker;
   wireSettingsReload({
     onRemoteChange,
     vrmSelection,
@@ -186,12 +162,20 @@ async function bootstrap(): Promise<BootstrapHandle> {
     log,
   });
 
-  const push = wirePushStores({
+  const push = createPushStores({
     getEndpoints: petConfig.getEndpoints,
     getChatKey: () => config.secrets.get(CHAT_API_KEY_SECRET),
-    bridge: windowBridge,
     register,
   });
+  publishPushStores(push, windowBridge, register);
+
+  // The bus and input source come first: the settings panel submits its help requests through them.
+  // The bus is safe to create before config load: it only queues until the dispatcher starts popping.
+  const bus = createEventBus({
+    onDrop: (env, reason) => log.info("drop", { event_name: env.event_name, reason }),
+  });
+  const userInput = createUserInputSource(bus);
+  const help = wireHelpGuide({ userInput, bridge: windowBridge, register });
 
   const controls = wirePetControls({
     root,
@@ -209,6 +193,7 @@ async function bootstrap(): Promise<BootstrapHandle> {
     surfaces,
     remoteSurfaces: remote,
     openSettings,
+    onGuide: help.ask,
     openDevtools,
     register,
   });
@@ -216,12 +201,6 @@ async function bootstrap(): Promise<BootstrapHandle> {
   // ── Dispatcher spine ──────────────────────────────────────────────────────
   // event_bus → dispatcher → backend_caller → streamChat → backend → ControlEnvelope →
   // renderer.applyDirective. user.text_submitted drives this loop.
-  // bus/dispatcher safe to create before config load (backend_caller reads endpoints at call time
-  // from config). backend_caller needs config store, so wire after config creation.
-  const bus = createEventBus({
-    onDrop: (env, reason) => log.info("drop", { event_name: env.event_name, reason }),
-  });
-  const userInput = createUserInputSource(bus);
 
   register(attachSummonKey(surfaces));
 
@@ -234,7 +213,6 @@ async function bootstrap(): Promise<BootstrapHandle> {
     const configured = await createConfiguredBootstrap(cfg, {
       config,
       renderer,
-      ambient,
       surfaces,
       settings: settingsStores,
       conversation: conversationStores,
@@ -257,6 +235,7 @@ async function bootstrap(): Promise<BootstrapHandle> {
     });
     register(configured.dispose);
     if (isDisposed()) return { dispose };
+    help.bindInteraction(configured.noteInteraction);
     push.bind({
       vocabulary: configured.broker.vocabulary,
       stopTurn: configured.stopTurn,
@@ -268,9 +247,11 @@ async function bootstrap(): Promise<BootstrapHandle> {
           mount: root,
           store: push.delegations,
           pushState: push.pushSocket,
-          onOpenSettings: () => controls.get().open(undefined, { tab: "adv" }),
-          getMode,
-          subscribeMode: settingsStores.messageWindowSettings.subscribe,
+          onOpenSettings: () => controls.get().open(undefined, { tab: "conn" }),
+          suppression: messageWindowSuppression({
+            getMode,
+            subscribe: settingsStores.messageWindowSettings.subscribe,
+          }),
         }),
         getEndpoints: petConfig.getEndpoints,
         endpointsSettings: settingsStores.endpointsSettings,
@@ -309,20 +290,19 @@ async function bootstrap(): Promise<BootstrapHandle> {
         getGuardrails: petConfig.getGuardrails,
         configured,
         vrm,
-        refreshVoiceList,
         log,
       }),
     );
+    const configWatch = wireConfigWatch({ config, log, register });
+    // DEV-only: polling watcher runs — edits to configs/*.json reflected immediately.
+    if (import.meta.env.DEV) {
+      configWatch.startDev();
+    }
   } catch (err) {
     if (isDisposed()) return { dispose };
     log.error("config_or_vrm_load_failed", { error: String(err) });
-    // Boot failure = empty transparent window. Preserve cause (ConfigError vs VRM) visible to user (#316).
+    // The boot error card names the cause, ConfigError or VRM.
     if (!isDisposed()) showBootError(root, err);
-  }
-  const configWatch = wireConfigWatch({ config, log, register });
-  // DEV-only: polling watcher runs — edits to configs/*.json reflected immediately.
-  if (import.meta.env.DEV) {
-    configWatch.startDev();
   }
   return { dispose };
 }

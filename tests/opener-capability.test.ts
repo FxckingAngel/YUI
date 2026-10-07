@@ -38,8 +38,22 @@ describe("opener capability wiring", () => {
     ]);
   });
 
-  it("main window capability grants no opener:allow-open-url entry", () => {
-    expect(openerEntries(DEFAULT_CAPABILITY)).toHaveLength(0);
+  it("main window grants exactly one opener:allow-open-url scoped to http/https/mailto/tel", () => {
+    const entries = openerEntries(DEFAULT_CAPABILITY);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].allow).toEqual([
+      { url: "http://*" },
+      { url: "https://*" },
+      { url: "mailto:*" },
+      { url: "tel:*" },
+    ]);
+  });
+
+  it("settings window grants core:window:allow-close", () => {
+    const parsed = JSON.parse(
+      readFileSync(join(ROOT, "src-tauri/capabilities/settings.json"), "utf8"),
+    ) as { permissions: unknown[] };
+    expect(parsed.permissions).toContain("core:window:allow-close");
   });
 
   it("declares the tauri-plugin-opener dependency in Cargo.toml", () => {
@@ -48,8 +62,8 @@ describe("opener capability wiring", () => {
     expect(line).toBeDefined();
   });
 
-  it("initializes the opener plugin in lib.rs", () => {
-    const lib = readFileSync(join(ROOT, "src-tauri/src/lib.rs"), "utf8");
-    expect(lib).toContain("tauri_plugin_opener::init()");
+  it("initializes the opener plugin in plugins.rs", () => {
+    const plugins = readFileSync(join(ROOT, "src-tauri/src/plugins.rs"), "utf8");
+    expect(plugins).toContain("tauri_plugin_opener::init()");
   });
 });

@@ -28,7 +28,7 @@ One backend round trip, from the moment the dispatcher admits a trigger until th
 _Avoid_: request, exchange, interaction
 
 **Trigger**:
-The event that makes a turn a candidate — typed text, a voice segment, a physical poke, a schedule tick. Carried as one of `user`, `schedule`, `proactive`, `agent`, `signals`. Firing a trigger is not a decision to speak.
+The event that makes a turn a candidate — typed text, a voice segment, a physical poke, a schedule tick. Carried as one of `user`, `schedule`, `proactive`, `agent`, `signals`, `milestone`. Firing a trigger is not a decision to speak.
 _Avoid_: intent, command, prompt
 
 **Guardrails**:
@@ -36,7 +36,7 @@ The gate a trigger passes before it becomes a turn: cooldown, do-not-disturb, de
 _Avoid_: filter, policy, throttle
 
 **Tier**:
-How a trigger is routed. Tier 1 is performed locally with no backend call; tiers 2 and 3 become turns.
+How a trigger is routed. Tier 1 is performed locally with no backend call; tier 2 becomes a turn.
 
 **Trigger cue**:
 Metadata about a schedule/proactive firing source (label, user-authored context, timing), forwarded client→brain. Includes built-in touch/gesture cues.
@@ -47,7 +47,7 @@ The one-way `generate_express` instruction, brain→client: emotion, motion, a T
 _Avoid_: bare "cue", expression command, tag, control token
 
 **Reflex turn**:
-A gesture-fired turn (drag-held, window-sit, peek) that skips the thinking filler — immediate reaction, no deliberative pause.
+A gesture-fired turn (head pat, drag-held, window-sit, peek, drop, touch) that skips the thinking filler — immediate reaction, no deliberative pause.
 
 **Background marker**:
 The placeholder user-content text on turns with no real user utterance.
@@ -78,7 +78,7 @@ _Avoid_: thinking, placeholder, stall
 ### Surfaces & periphery
 
 **Surface**:
-A floating piece of chrome the character speaks or listens through (speech bubble, tool-status chip, text input, voice indicator) that appears only when it has something to show, then recedes.
+A floating piece of chrome the character speaks or listens through (speech bubble, status pill, text input) that appears only when it has something to show, then recedes.
 _Avoid_: widget, overlay, panel
 
 **Signals**:

@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ClientContext } from "../../contract";
+import { SIGNAL_ENVELOPE } from "../test-helpers";
 import { renderClientContext } from "./client-context-text";
 
 const NOW = 1_717_000_600_000; // 10min after the shared `since` fixtures below (1_717_000_000_000)
@@ -497,20 +498,32 @@ describe("renderClientContext — trigger: agent_catchup", () => {
 });
 
 describe("renderClientContext — trigger: signals", () => {
-  it("kind signals -> count headline + one 'signal:' JSON line per item", () => {
+  it("kind signals -> count headline + one 'signal [...]:' line per item", () => {
     const cc = baseContext({
       kind: "signals",
-      signals: [{ items: [{ source: "github", event: "push" }, { source: "heartbeat" }] }],
+      signals: [
+        {
+          envelope: SIGNAL_ENVELOPE,
+          items: [{ source: "github", event: "push" }, { source: "heartbeat" }],
+        },
+      ],
     });
     const text = renderClientContext(cc, NOW);
     const lines = text.split("\n");
     expect(lines).toContain("trigger: signals (2 signals)");
-    expect(lines).toContain('signal: {"source":"github","event":"push"}');
-    expect(lines).toContain('signal: {"source":"heartbeat"}');
+    expect(lines).toContain(
+      'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"source":"github","event":"push"}',
+    );
+    expect(lines).toContain(
+      'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"source":"heartbeat"}',
+    );
   });
 
   it("singular count -> '1 signal', not '1 signals'", () => {
-    const cc = baseContext({ kind: "signals", signals: [{ items: [{ source: "heartbeat" }] }] });
+    const cc = baseContext({
+      kind: "signals",
+      signals: [{ envelope: SIGNAL_ENVELOPE, items: [{ source: "heartbeat" }] }],
+    });
     const text = renderClientContext(cc, NOW);
     expect(text.split("\n")).toContain("trigger: signals (1 signal)");
   });
@@ -525,13 +538,15 @@ describe("renderClientContext — trigger: signals", () => {
     const cc = baseContext({
       kind: "proactive",
       cue: { label: "bored poking", context: "The user wants attention." },
-      signals: [{ items: [{ kind: "reminder" }] }],
+      signals: [{ envelope: SIGNAL_ENVELOPE, items: [{ kind: "reminder" }] }],
     });
     const text = renderClientContext(cc, NOW);
     const lines = text.split("\n");
     expect(lines).toContain('trigger: proactive "bored poking"');
     expect(lines).toContain("cue note: The user wants attention.");
-    expect(lines).toContain('signal: {"kind":"reminder"}');
+    expect(lines).toContain(
+      'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"kind":"reminder"}',
+    );
   });
 
   it("renders enveloped items, an empty group, and one-line-normalized ids", () => {
@@ -713,12 +728,12 @@ describe("renderClientContext — exhaustiveness", () => {
     ["user", { kind: "user" }, ["trigger: user message"]],
     [
       "schedule",
-      { kind: "schedule", cue: { label: "morning call", local_time: "09:00" } },
+      { kind: "schedule", cue: { label: "morning call" } },
       ['trigger: schedule "morning call"'],
     ],
     [
       "proactive-cue",
-      { kind: "proactive", cue: { label: "cowork", idle_min: 10 }, idle_elapsed_min: 60 },
+      { kind: "proactive", cue: { label: "cowork" }, idle_elapsed_min: 60 },
       ['trigger: proactive "cowork" (user idle 60min)'],
     ],
     [
@@ -763,17 +778,23 @@ describe("renderClientContext — exhaustiveness", () => {
     ],
     [
       "signals",
-      { kind: "signals", signals: [{ items: [{ a: 1 }] }] },
-      ["trigger: signals (1 signal)", 'signal: {"a":1}'],
+      { kind: "signals", signals: [{ envelope: SIGNAL_ENVELOPE, items: [{ a: 1 }] }] },
+      [
+        "trigger: signals (1 signal)",
+        'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"a":1}',
+      ],
     ],
     [
       "milestone",
       {
         kind: "milestone",
         milestone: { name: "first_activity", local_time: "08:12" },
-        signals: [{ items: [{ a: 1 }] }],
+        signals: [{ envelope: SIGNAL_ENVELOPE, items: [{ a: 1 }] }],
       },
-      ["trigger: milestone first_activity (08:12)", 'signal: {"a":1}'],
+      [
+        "trigger: milestone first_activity (08:12)",
+        'signal [n8n/workflow_done @2026-08-23T01:36:40.000Z, id run-8812]: {"a":1}',
+      ],
     ],
   ];
 
@@ -799,5 +820,28 @@ describe("renderClientContext — exhaustiveness", () => {
     for (const substring of expectedSubstrings) {
       expect(text).toContain(substring);
     }
+  });
+});
+
+describe("renderClientContext — guide block", () => {
+  it("a turn carrying a guide key renders the matching doc after the trigger line", () => {
+    const text = renderClientContext(baseContext({ kind: "user", guide: "controls" }), NOW);
+
+    expect(text).toContain("trigger: user message\nguide:\n");
+    expect(text).toContain("The user pressed the in-app help button.");
+    expect(text).toContain("# Controls");
+    expect(text).not.toContain("# What she can do");
+  });
+
+  it("the capabilities key renders the capabilities guide", () => {
+    const text = renderClientContext(baseContext({ kind: "user", guide: "capabilities" }), NOW);
+
+    expect(text).toContain("# What she can do");
+  });
+
+  it("a turn without a guide key renders no guide block", () => {
+    const text = renderClientContext(baseContext({ kind: "user" }), NOW);
+
+    expect(text).not.toContain("guide:");
   });
 });

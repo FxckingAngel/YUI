@@ -10,13 +10,11 @@ export default defineConfig({
   appearance: 'force-dark',
   head: [
     ['link', { rel: 'icon', type: 'image/png', href: '/YUI/favicon.png' }],
-    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
-    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
     [
       'link',
       {
         rel: 'stylesheet',
-        href: 'https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@500;600;700&display=swap',
+        href: '/YUI/fonts/pretendardjp/pretendardjp-dynamic-subset.css',
       },
     ],
     ['meta', { property: 'og:type', content: 'website' }],
@@ -35,7 +33,13 @@ export default defineConfig({
       { text: 'Home', link: '/' },
       {
         text: 'Guide',
-        items: [{ text: 'Getting Started', link: '/guide/getting-started' }],
+        items: [
+          { text: 'Install with an Agent', link: '/guide/install' },
+          { text: 'Getting Started', link: '/guide/getting-started' },
+          { text: 'Features', link: '/guide/features' },
+          { text: 'Controls', link: '/guide/controls' },
+          { text: 'What she can do', link: '/guide/capabilities' },
+        ],
       },
       {
         text: 'Reference',
@@ -55,7 +59,13 @@ export default defineConfig({
       '/guide/': [
         {
           text: 'Guide',
-          items: [{ text: 'Getting Started', link: '/guide/getting-started' }],
+          items: [
+          { text: 'Install with an Agent', link: '/guide/install' },
+          { text: 'Getting Started', link: '/guide/getting-started' },
+          { text: 'Features', link: '/guide/features' },
+          { text: 'Controls', link: '/guide/controls' },
+          { text: 'What she can do', link: '/guide/capabilities' },
+        ],
         },
       ],
       '/reference/': [

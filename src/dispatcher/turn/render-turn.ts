@@ -25,10 +25,10 @@
  */
 
 import type { ExpressArgs } from "../../contract";
-import type { ChatHistoryEntry } from "../../io/chat/chat-history-store";
-import type { RenderFrame, RenderSegment, SpeechFrame } from "../../io/chat/push-socket";
-import { isSilenceToken } from "../../io/chat/silence-token";
-import { buildRenderRecord, type RenderRecord } from "../../io/chat/turn-record-log";
+import type { ChatHistoryEntry } from "../../io/chat/conversation/chat-history-store";
+import type { RenderFrame, RenderSegment, SpeechFrame } from "../../io/chat/push/push-frames";
+import { buildRenderRecord, type RenderRecord } from "../../io/chat/record/turn-record-log";
+import { isSilenceToken } from "../../io/chat/stream/silence-token";
 import { createLogger, type Logger } from "../../logger";
 import { PRE_SPEECH_TIMEOUT_MS } from "../backend/idle-watchdog";
 import type { PushTurns } from "./push-turn";
@@ -43,6 +43,8 @@ export interface RenderTurnDeps {
   /** Conversation transcript — the reply half of a push turn lands here. */
   appendTranscript?: (entry: ChatHistoryEntry) => void;
   appendTurnRecord?: (record: RenderRecord) => void;
+  /** Speech-gate sink — a frame of the turn spoke text, independent of TTS. */
+  reportSpokeText?: (turnId: string, spoke: boolean) => void;
   logger?: Logger;
 }
 
@@ -136,6 +138,8 @@ export function createRenderTurn(deps: RenderTurnDeps): RenderTurn {
         applyCue();
       }
     }
+    // Only a frame that spoke reports: a later silent frame of the same turn leaves it standing.
+    if (spokeText) deps.reportSpokeText?.(turnId, true);
     return { spokeText, said, queuedBehind };
   }
 

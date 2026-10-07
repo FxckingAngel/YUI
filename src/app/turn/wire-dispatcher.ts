@@ -1,5 +1,6 @@
 /** Wires the turn feed, the backend caller, guardrails, the pacer and the dispatcher. */
-import { type AppConfig, CHAT_API_KEY_SECRET } from "../../config/load";
+import type { AppConfig } from "../../config/load";
+import { CHAT_API_KEY_SECRET } from "../../config/secrets";
 import type { EndpointsConfig, FrontmostState, ToolStatus } from "../../contract";
 import { createBackendCaller } from "../../dispatcher/backend/backend-caller";
 import type { PreviousTurnSlot } from "../../dispatcher/backend/previous-turn";
@@ -12,13 +13,17 @@ import {
 import { createProactivePacer, type ProactivePacer } from "../../dispatcher/core/proactive-pacer";
 import { createDispatcher, type Dispatcher } from "../../dispatcher/dispatcher";
 import type { PushTurns } from "../../dispatcher/turn/push-turn";
+import type { QuotedTurn } from "../../dispatcher/turn/quoted-turn";
 import type { TurnLog } from "../../dispatcher/turn/turn";
 import { createTurnFeed, type TurnFeed } from "../../dispatcher/turn/turn-feed";
-import type { ReasoningStore } from "../../io/bridge/reasoning-store";
-import type { BrokerPayload } from "../../io/chat/broker-client";
-import { createClientToolRegistry, createGenerateExpressTool } from "../../io/chat/client-tools";
-import type { PushSocket } from "../../io/chat/push-socket";
-import type { PacerSkipRecord, TurnRecord } from "../../io/chat/turn-record-log";
+import type { ReasoningStore } from "../../io/bridge/reasoning/reasoning-store";
+import type { BrokerPayload } from "../../io/chat/broker/broker-client";
+import type { PushSocket } from "../../io/chat/push/push-socket";
+import type { PacerSkipRecord, TurnRecord } from "../../io/chat/record/turn-record-log";
+import {
+  createClientToolRegistry,
+  createGenerateExpressTool,
+} from "../../io/chat/stream/client-tools";
 import type { ScreenCapturer } from "../../io/window/capture/screen-source-provider";
 import { buildScreenshotBlock } from "../../io/window/capture/screenshot-context";
 import type { Renderer } from "../../renderer";
@@ -33,7 +38,7 @@ import type { QuickControlsTab } from "../../ui/quick-controls/constants";
 import type { Surfaces } from "../../ui/surfaces/surfaces";
 import { wireGuardrailsOverrides } from "../cross-window/wire-window-sync";
 import type { ConversationStores } from "../settings/conversation-stores";
-import type { VoicePipeline } from "./wire-voice-pipeline";
+import type { VoicePipeline } from "./voice/wire-voice-pipeline";
 
 export function wireDispatcher(deps: {
   bus: EventBus;
@@ -69,10 +74,11 @@ export function wireDispatcher(deps: {
   voice: Pick<VoicePipeline, "turnOutput" | "speakFailure">;
   turnLog: TurnLog;
   previousTurn: PreviousTurnSlot;
+  quotedTurn: Pick<QuotedTurn, "admitted" | "failed">;
   pushTurns: PushTurns;
   pushSocket: PushSocket | null;
   getVocabulary: () => BrokerPayload;
-  openQuickControls: (tab: QuickControlsTab) => void;
+  openQuickControls?: (tab: QuickControlsTab) => void;
   showVoiceError: (reason: string) => void;
   appendTurnRecord: (record: TurnRecord | PacerSkipRecord) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
@@ -107,6 +113,7 @@ export function wireDispatcher(deps: {
     voice,
     turnLog,
     previousTurn,
+    quotedTurn,
     pushTurns,
     pushSocket,
     getVocabulary,
@@ -145,7 +152,7 @@ export function wireDispatcher(deps: {
       );
     },
     turnOutput: voice.turnOutput,
-    reportSpokeText: (spoke) => turnLog.setSpokeText(spoke),
+    reportSpokeText: (turnId, spoke) => turnLog.setSpokeText(turnId, spoke),
     turnFeed,
     getScreenshot: async () => {
       const screenshot = screenshotSettings.get();
@@ -192,10 +199,14 @@ export function wireDispatcher(deps: {
     hasOutstandingSpeech: () => voice.turnOutput.hasOutstandingSpeech(),
     pacer,
     appendSkipRecord: appendTurnRecord,
-    onTurnFailed: previousTurn.callFailed,
-    onUserTurnFailed: (reason, source) => {
+    onTurnAdmitted: quotedTurn.admitted,
+    onTurnFailed: (turn, reason) => {
+      previousTurn.callFailed(turn, reason);
+      quotedTurn.failed(turn);
+    },
+    onUserTurnFailed: (reason, source, detail) => {
       voice.speakFailure(reason);
-      const message = turnErrorMessage(reason);
+      const message = turnErrorMessage(reason, detail);
       if (!message) return;
       const action = routeTurnFailure(source, surfaces.isInputOpen());
       if (action.kind === "show_input_error") {

@@ -21,48 +21,32 @@ const { created, started, drainQueue, makeSource } = vi.hoisted(() => {
   return { created, started, drainQueue, makeSource };
 });
 
-vi.mock("../../dispatcher/sources/proactive-source", () => ({
+vi.mock("../../dispatcher/sources/idle-tick/proactive-source", () => ({
   createProactiveSource: vi.fn(makeSource("proactive")),
 }));
 
-vi.mock("../../dispatcher/sources/schedule-source", () => ({
+vi.mock("../../dispatcher/sources/idle-tick/schedule-source", () => ({
   createScheduleSource: vi.fn(makeSource("schedule")),
 }));
 
-vi.mock("../../dispatcher/sources/agent-source", () => ({
+vi.mock("../../dispatcher/sources/inbox/agent-source", () => ({
   createAgentSource: vi.fn(makeSource("agent")),
 }));
 
-vi.mock("../../dispatcher/sources/signals-source", () => ({
+vi.mock("../../dispatcher/sources/inbox/signals-source", () => ({
   createSignalsSource: vi.fn(makeSource("signals")),
 }));
 
-vi.mock("../../dispatcher/sources/screen-source", () => ({
+vi.mock("../../dispatcher/sources/idle-tick/screen-source", () => ({
   createScreenSource: vi.fn(makeSource("screen")),
 }));
 
-vi.mock("../../dispatcher/sources/milestone-source", () => ({
+vi.mock("../../dispatcher/sources/idle-tick/milestone-source", () => ({
   createMilestoneSource: vi.fn(makeSource("milestone")),
 }));
 
 import { createScreenKnobSettings, mergeScreen } from "../../settings/capture/screen-settings";
-import { wireSummonHotkey } from "../stage/wire-summon";
-import { wireDispatcherSources, wireWindowSources } from "./wire-sources";
-
-describe("configured platform wiring", () => {
-  it("returns stable no-op handles outside Tauri", async () => {
-    const windowSources = wireWindowSources({} as never);
-    const summonHotkey = wireSummonHotkey({ accelerator: "CmdOrCtrl+Shift+Y" } as never);
-
-    expect(() => {
-      windowSources.noteUserDrag();
-      windowSources.noteUserDragEnd();
-      windowSources.dispose();
-    }).not.toThrow();
-    await expect(summonHotkey.apply("CmdOrCtrl+Shift+U")).resolves.toBeUndefined();
-    await expect(summonHotkey.dispose()).resolves.toBeUndefined();
-  });
-});
+import { wireDispatcherSources } from "./wire-sources";
 
 describe("wireDispatcherSources", () => {
   beforeEach(() => {

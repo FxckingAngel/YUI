@@ -1,8 +1,8 @@
 /**
  * voice-error-dwell.test.ts
  *
- * The voice indicator's error dwell. A transient failure self-clears back to
- * listening so the chip does not sit red forever; a settings-fixable one holds,
+ * The status pill's voice error dwell. A transient failure self-clears back to
+ * listening so the pill does not sit red forever; a settings-fixable one holds,
  * because a fix affordance that vanishes mid-reach is worse than none.
  */
 
@@ -90,5 +90,27 @@ describe("createVoiceErrorDwell", () => {
     vi.advanceTimersByTime(VOICE_TURN_ERROR_DISPLAY_MS);
 
     expect(status.get().state).toBe("error");
+  });
+
+  describe("with a voice host", () => {
+    it("reverts to listening while the host still wants the mic", () => {
+      const status = createVoiceInputStatus();
+      createVoiceErrorDwell(status, { wanted: () => true }).show("network_drop");
+
+      vi.advanceTimersByTime(VOICE_TURN_ERROR_DISPLAY_MS);
+
+      expect(status.get().state).toBe("listening");
+    });
+
+    it("reads wanted() when the hold ends, not when the error is shown", () => {
+      const status = createVoiceInputStatus();
+      let wanted = true;
+      createVoiceErrorDwell(status, { wanted: () => wanted }).show("network_drop");
+      wanted = false;
+
+      vi.advanceTimersByTime(VOICE_TURN_ERROR_DISPLAY_MS);
+
+      expect(status.get().state).toBe("idle");
+    });
   });
 });

@@ -6,6 +6,7 @@
  */
 
 import type { ClientContext, TriggerMeta } from "../../contract";
+import { renderGuideBlock } from "../../io/guide/guide-docs";
 
 /** Collapses embedded newlines/whitespace runs to a single space and strips any
     `<client_context>`/`</client_context>` tag sequence, so a sampled or user-authored string can
@@ -131,10 +132,6 @@ function renderTrigger(trigger: TriggerMeta, nowMs: number): string[] {
 
   if (trigger.signals) {
     for (const group of trigger.signals) {
-      if (!group.envelope) {
-        for (const item of group.items) lines.push(`signal: ${JSON.stringify(item)}`);
-        continue;
-      }
       const envelope = group.envelope;
       const prefix = `signal [${oneLine(envelope.source)}/${oneLine(envelope.event_type)} @${new Date(envelope.occurred_at).toISOString()}, id ${oneLine(envelope.event_id)}]:`;
       if (group.items.length === 0) {
@@ -164,6 +161,7 @@ export function renderClientContext(clientContext: ClientContext, nowMs: number)
   if (previous) lines.push(previous);
 
   lines.push(...renderTrigger(clientContext.trigger, nowMs));
+  if (clientContext.trigger.guide) lines.push(renderGuideBlock(clientContext.trigger.guide));
 
   return lines.join("\n");
 }

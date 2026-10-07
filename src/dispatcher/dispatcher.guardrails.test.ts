@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PeekConfig, TapConfig } from "../config/load";
+import type { PeekConfig, TapConfig } from "../config/validators/avatar/types";
 import type { Logger } from "../logger";
 import type { BackendCaller } from "./backend/backend-caller";
 import { type BusEnvelope, createEventBus, type EventBus } from "./core/event-bus";
@@ -150,7 +150,6 @@ describe("dispatcher — guardrail gating (§6)", () => {
           ts: NOW + i,
           dnd_override: false,
         }),
-        2,
       );
     }
     expect(g.cooldownActive()).toBe(true);
@@ -158,7 +157,6 @@ describe("dispatcher — guardrail gating (§6)", () => {
       env({
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -176,7 +174,6 @@ describe("dispatcher — guardrail gating (§6)", () => {
         source: "os_event_watcher",
         event_name: "proactive.drag_held",
         ts: NOW,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -190,7 +187,6 @@ describe("dispatcher — guardrail gating (§6)", () => {
         source: "os_event_watcher",
         event_name: "proactive.drag_held",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -221,7 +217,6 @@ describe("dispatcher — global proactive pacer gate", () => {
       source: "screen_watcher",
       event_name: "proactive.screen_app_switched",
       ts: NOW,
-      hint_tier: 2,
       dnd_override: false,
       ...over,
     };

@@ -1,8 +1,45 @@
-//! Shared import filesystem helpers — sanitize, hash, derive stem, collision
-//! check, and container-signature sniffing.
+//! Shared import filesystem helpers — sanitize, hash, dest stem candidates, bounded streamed
+//! copy, and container-signature sniffing.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use tauri::{AppHandle, Manager};
+use tauri_plugin_fs::{FilePath, FsExt, OpenOptions as FsOpenOptions};
+
+/// `<app_data_dir>/<name>`, or a generic error when the app data directory is unavailable.
+pub(crate) fn app_data_subdir(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join(name))
+        .map_err(|e| {
+            log::error!("app_data_dir_unavailable error={e}");
+            "storage unavailable".to_string()
+        })
+}
+
+/// Open `src_path` through the fs plugin and run `import(name, identity, source)` on a blocking thread.
+pub(crate) async fn open_and_import<T: Send + 'static>(
+    app: AppHandle,
+    src_path: FilePath,
+    import: impl FnOnce(Option<String>, String, std::fs::File) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let identity = src_path.to_string();
+        let name = app.path().file_name(&identity);
+        let mut opts = FsOpenOptions::new();
+        opts.read(true);
+        let source = app.fs().open(src_path, opts).map_err(|e| {
+            log::error!("open_source_failed error={e}");
+            "source file not found".to_string()
+        })?;
+        import(name, identity, source)
+    })
+    .await
+    .map_err(|e| {
+        log::error!("import_task_failed error={e}");
+        "import failed".to_string()
+    })?
+}
 
 /// Container kinds we content-validate before copying an imported file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,6 +53,9 @@ pub(crate) enum SniffKind {
     M4a,
     Aac,
     Webm,
+    Png,
+    Jpeg,
+    Webp,
 }
 
 /// Bytes read from the source head to recognize a container signature.
@@ -32,6 +72,16 @@ pub(crate) fn audio_sniff_kind(ext_lower: &str) -> Option<SniffKind> {
         "aac" => Some(SniffKind::Aac),
         "opus" => Some(SniffKind::Opus),
         "webm" => Some(SniffKind::Webm),
+        _ => None,
+    }
+}
+
+/// Map an image extension (any case) to its stored extension and sniff kind.
+pub(crate) fn image_ext(ext: &str) -> Option<(&'static str, SniffKind)> {
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => Some(("png", SniffKind::Png)),
+        "jpg" | "jpeg" => Some(("jpg", SniffKind::Jpeg)),
+        "webp" => Some(("webp", SniffKind::Webp)),
         _ => None,
     }
 }
@@ -54,6 +104,11 @@ pub(crate) fn sniff_ok(header: &[u8], kind: SniffKind) -> bool {
                 || (header.len() >= 2 && header[0] == 0xFF && header[1] & 0xF6 == 0xF0)
         }
         SniffKind::Webm => header.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]),
+        SniffKind::Png => header.starts_with(b"\x89PNG\r\n\x1a\n"),
+        SniffKind::Jpeg => header.starts_with(&[0xFF, 0xD8, 0xFF]),
+        SniffKind::Webp => {
+            header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP"
+        }
     }
 }
 
@@ -204,38 +259,120 @@ pub(crate) fn short_hash(s: &str) -> String {
     format!("{:x}", h & 0xffffff)
 }
 
-/// Derive the dest filename stem from a source path, disambiguating on collision.
-/// `taken(stem)` reports whether `stem` is already claimed by an existing dest.
-pub(crate) fn derive_dest_stem(src: &Path, taken: impl Fn(&str) -> bool) -> String {
-    let raw = src.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let base = sanitize_stem(raw);
-    if !taken(&base) {
-        return base;
-    }
-    let suffixed = format!("{}-{}", base, short_hash(&src.to_string_lossy()));
-    if !taken(&suffixed) {
-        return suffixed;
-    }
-    // Last resort: numeric walk.
-    for n in 2.. {
-        let candidate = format!("{}-{}", base, n);
-        if !taken(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!()
+/// `base` plus `-suffix`, with `base` shortened on a char boundary so the whole stays within
+/// `MAX_STEM_BYTES`.
+fn suffixed(base: &str, suffix: &str) -> String {
+    let room = MAX_STEM_BYTES.saturating_sub(suffix.len() + 1);
+    format!("{}-{suffix}", truncate_at_char_boundary(base, room))
 }
 
-/// True when `dest` already exists — any existing dest is a collision, so the
-/// caller must disambiguate rather than overwrite.
-pub(crate) fn collides(dest: &Path) -> bool {
-    dest.exists()
+/// Candidate dest stems in claim order: the sanitized name, the name with a hash of the source
+/// identity, then a numeric walk. Every candidate stays within `MAX_STEM_BYTES`. Reserved ids are skipped; the caller claims a stem by creating
+/// its file and moves to the next candidate when it already exists.
+pub(crate) fn dest_stem_candidates<'a>(
+    name_stem: &str,
+    identity: &str,
+    reserved: &'a [String],
+) -> impl Iterator<Item = String> + 'a {
+    let base = sanitize_stem(name_stem);
+    let hashed = suffixed(&base, &short_hash(identity));
+    let numbered = {
+        let base = base.clone();
+        (2..).map(move |n| suffixed(&base, &n.to_string()))
+    };
+    [base, hashed]
+        .into_iter()
+        .chain(numbered)
+        .filter(move |c| !reserved.contains(c))
+}
+
+/// Where and how `claim_and_copy` stores one imported file.
+pub(crate) struct ClaimTarget<'a> {
+    pub dir: &'a Path,
+    pub name_stem: &'a str,
+    pub identity: &'a str,
+    pub ext: &'a str,
+    pub kind: SniffKind,
+    pub cap: u64,
+    pub reserved: &'a [String],
+}
+
+/// Copy `reader` into `target.dir` under the first free candidate stem.
+pub(crate) fn claim_and_copy(
+    mut reader: impl Read,
+    target: &ClaimTarget,
+) -> Result<(String, PathBuf), String> {
+    std::fs::create_dir_all(target.dir).map_err(|e| {
+        log::error!("create_dir_failed dest={} error={e}", target.dir.display());
+        "storage unavailable".to_string()
+    })?;
+    for stem in dest_stem_candidates(target.name_stem, target.identity, target.reserved) {
+        let dest = target.dir.join(format!("{stem}.{}", target.ext));
+        ensure_within(target.dir, &dest)?;
+        // create_new claims the stem atomically, so concurrent imports never share a dest.
+        let file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&dest)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                log::error!("create_dest_failed dest={} error={e}", dest.display());
+                return Err("import failed".to_string());
+            }
+        };
+        if let Err(e) = copy_bounded(&mut reader, file, target.cap, target.kind) {
+            let _ = std::fs::remove_file(&dest);
+            return Err(e);
+        }
+        return Ok((stem, dest));
+    }
+    Err("import failed".to_string())
+}
+
+/// Stream `reader` into `writer`, reading at most `cap + 1` bytes. The first bytes are
+/// checked for the signature of `kind` before anything is written; the stream is rejected when it carries
+/// more than `cap` bytes. Errors are generic; the caller removes the partial destination.
+pub(crate) fn copy_bounded(
+    reader: impl Read,
+    mut writer: impl Write,
+    cap: u64,
+    kind: SniffKind,
+) -> Result<u64, String> {
+    let mut reader = reader.take(cap.saturating_add(1));
+    let mut header = [0u8; SNIFF_HEADER_LEN];
+    let mut filled = 0;
+    while filled < header.len() {
+        match reader.read(&mut header[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => {
+                log::warn!("copy_read_failed error={e}");
+                return Err("source file not found".to_string());
+            }
+        }
+    }
+    if !sniff_ok(&header[..filled], kind) {
+        return Err("unrecognized file type".to_string());
+    }
+    let fail = |e: std::io::Error| {
+        log::error!("copy_failed error={e}");
+        "import failed".to_string()
+    };
+    writer.write_all(&header[..filled]).map_err(fail)?;
+    let rest = std::io::copy(&mut reader, &mut writer).map_err(fail)?;
+    let total = filled as u64 + rest;
+    if total > cap {
+        return Err("source file too large".to_string());
+    }
+    Ok(total)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     /// A safe stem can never be empty, `.`, `..`, contain a path separator, a Windows-illegal
     /// character, an ASCII control char, or carry a leading/trailing dot or whitespace —
@@ -465,57 +602,134 @@ mod tests {
         assert!(ensure_within(&parent, &sibling).is_err());
     }
 
-    // ── derive_dest_stem ─────────────────────────────────────────────────────
+    // ── dest_stem_candidates ─────────────────────────────────────────────────
 
-    #[test]
-    fn derive_uses_sanitized_stem_when_no_collision() {
-        let src = PathBuf::from("/Users/me/Downloads/My Avatar.vrm");
-        let stem = derive_dest_stem(&src, |_| false);
-        // Interior spaces are kept by the relaxed sanitize_stem — only traversal/illegal chars are neutralized.
-        assert_eq!(stem, "My Avatar");
+    fn first_n(name: &str, identity: &str, reserved: &[String], n: usize) -> Vec<String> {
+        dest_stem_candidates(name, identity, reserved)
+            .take(n)
+            .collect()
     }
 
     #[test]
-    fn derive_disambiguates_on_any_existing_dest() {
-        let src = PathBuf::from("/a/b/Cat.vrm");
-        let stem = derive_dest_stem(&src, |candidate| candidate == "Cat");
-        assert_ne!(stem, "Cat");
-        assert!(stem.starts_with("Cat"));
-        assert!(is_safe_stem(&stem));
+    fn candidates_stay_within_the_stem_cap_and_stay_safe_for_a_stem_at_the_cap() {
+        let long = "あ".repeat(MAX_STEM_BYTES / 3) + "x";
+        let candidates = first_n(&long, "/x/y", &[], 14);
+        for c in &candidates {
+            assert!(c.len() <= MAX_STEM_BYTES, "{} bytes", c.len());
+            assert_eq!(sanitize_stem(c), *c);
+        }
+        let distinct: std::collections::HashSet<_> = candidates.iter().collect();
+        assert_eq!(distinct.len(), candidates.len());
     }
 
     #[test]
-    fn derive_is_deterministic_for_a_given_src_path() {
-        let src = PathBuf::from("/a/b/Cat.vrm");
-        let a = derive_dest_stem(&src, |c| c == "Cat");
-        let b = derive_dest_stem(&src, |c| c == "Cat");
-        assert_eq!(a, b);
+    fn candidates_follow_base_then_hash_then_numeric_walk() {
+        let c = first_n("Cat", "/a/b/Cat.vrm", &[], 4);
+        assert_eq!(c[0], "Cat");
+        assert_eq!(c[1], format!("Cat-{}", short_hash("/a/b/Cat.vrm")));
+        assert_eq!(c[2], "Cat-2");
+        assert_eq!(c[3], "Cat-3");
+        assert!(c.iter().all(|s| is_safe_stem(s)));
     }
 
     #[test]
-    fn derive_distinct_src_paths_disambiguate_differently() {
-        let src1 = PathBuf::from("/dir-one/Cat.vrm");
-        let src2 = PathBuf::from("/dir-two/Cat.vrm");
-        let a = derive_dest_stem(&src1, |c| c == "Cat");
-        let b = derive_dest_stem(&src2, |c| c == "Cat");
-        assert_ne!(a, b);
-    }
-
-    // ── collides ─────────────────────────────────────────────────────────────
-
-    #[test]
-    fn collides_is_false_when_dest_absent() {
-        let dest = std::env::temp_dir().join("yui_collides_absent_xyz.vrm");
-        let _ = std::fs::remove_file(&dest);
-        assert!(!collides(&dest));
+    fn candidates_skip_reserved_ids() {
+        let reserved = vec!["Cat".to_string(), "Cat-2".to_string()];
+        let c = first_n("Cat", "/a/b/Cat.vrm", &reserved, 2);
+        assert!(!c.contains(&"Cat".to_string()));
+        assert!(!c.contains(&"Cat-2".to_string()));
+        assert_eq!(c[0], format!("Cat-{}", short_hash("/a/b/Cat.vrm")));
+        assert_eq!(c[1], "Cat-3");
     }
 
     #[test]
-    fn collides_is_true_for_any_existing_dest_regardless_of_length() {
-        let dest = std::env::temp_dir().join("yui_collides_present.vrm");
-        std::fs::write(&dest, b"any bytes").unwrap();
-        assert!(collides(&dest));
-        let _ = std::fs::remove_file(&dest);
+    fn candidates_use_the_identity_for_disambiguation_only() {
+        let a = first_n("Cat", "content://x/1", &[], 2);
+        let b = first_n("Cat", "content://x/2", &[], 2);
+        assert_eq!(a[0], b[0]);
+        assert_ne!(a[1], b[1]);
+    }
+
+    // ── copy_bounded ─────────────────────────────────────────────────────────
+
+    /// A reader that yields one byte per call.
+    struct OneByte<'a>(&'a [u8]);
+
+    impl Read for OneByte<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.0.split_first() {
+                Some((b, rest)) if !buf.is_empty() => {
+                    buf[0] = *b;
+                    self.0 = rest;
+                    Ok(1)
+                }
+                _ => Ok(0),
+            }
+        }
+    }
+
+    struct FailingWriter;
+
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("disk full"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    const GLB: &[u8] = b"glTF\x02\x00\x00\x00binary chunk of the model";
+
+    #[test]
+    fn copy_bounded_copies_a_glb_stream_under_the_cap() {
+        let mut out = Vec::new();
+        let n = copy_bounded(GLB, &mut out, 1024, SniffKind::Glb).unwrap();
+        assert_eq!(n, GLB.len() as u64);
+        assert_eq!(out, GLB);
+    }
+
+    #[test]
+    fn copy_bounded_accepts_exactly_the_cap_and_rejects_one_over() {
+        let mut out = Vec::new();
+        assert!(copy_bounded(GLB, &mut out, GLB.len() as u64, SniffKind::Glb).is_ok());
+        let mut out = Vec::new();
+        assert!(copy_bounded(GLB, &mut out, GLB.len() as u64 - 1, SniffKind::Glb).is_err());
+    }
+
+    #[test]
+    fn copy_bounded_stops_reading_past_the_cap() {
+        let mut data = GLB.to_vec();
+        data.extend(std::iter::repeat_n(0u8, 10_000));
+        let mut out = Vec::new();
+        assert!(copy_bounded(&data[..], &mut out, 64, SniffKind::Glb).is_err());
+        assert!(out.len() <= 65, "wrote {} bytes past the cap", out.len());
+    }
+
+    #[test]
+    fn copy_bounded_rejects_bad_magic_without_writing() {
+        let mut out = Vec::new();
+        assert!(copy_bounded(
+            &b"%PDF-1.4 not a vrm at all"[..],
+            &mut out,
+            1024,
+            SniffKind::Glb
+        )
+        .is_err());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn copy_bounded_handles_one_byte_reads() {
+        let mut out = Vec::new();
+        let n = copy_bounded(OneByte(GLB), &mut out, 1024, SniffKind::Glb).unwrap();
+        assert_eq!(n, GLB.len() as u64);
+        assert_eq!(out, GLB);
+    }
+
+    #[test]
+    fn copy_bounded_surfaces_a_write_error() {
+        assert!(copy_bounded(GLB, FailingWriter, 1024, SniffKind::Glb).is_err());
     }
 
     // ── short_hash ───────────────────────────────────────────────────────────
@@ -628,5 +842,92 @@ mod tests {
         assert!(sniff_file(&path, SniffKind::Glb).unwrap());
         assert!(!sniff_file(&path, SniffKind::Wav).unwrap());
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ── image sniffs and claim_and_copy ─────────────────────────────────────
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRpixels";
+    const JPEG: &[u8] = b"\xFF\xD8\xFF\xE0\x00\x10JFIFpixels";
+
+    #[test]
+    fn sniff_images_reject_each_others_signatures() {
+        assert!(!sniff_ok(JPEG, SniffKind::Png));
+        assert!(!sniff_ok(PNG, SniffKind::Jpeg));
+        assert!(!sniff_ok(b"RIFF\x24\x00\x00\x00WAVEfmt ", SniffKind::Webp));
+        assert!(!sniff_ok(b"RIFF\x24\x00", SniffKind::Webp));
+    }
+
+    #[test]
+    fn copy_bounded_checks_the_given_kind() {
+        let mut out = Vec::new();
+        assert_eq!(
+            copy_bounded(PNG, &mut out, 1024, SniffKind::Png).unwrap(),
+            PNG.len() as u64
+        );
+        let mut out = Vec::new();
+        assert!(copy_bounded(PNG, &mut out, 1024, SniffKind::Jpeg).is_err());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn copy_bounded_errors_name_no_format() {
+        let err = copy_bounded(&b"zzzz"[..], Vec::new(), 1024, SniffKind::Png).unwrap_err();
+        assert!(!err.contains("vrm"), "{err}");
+    }
+
+    fn claim_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("yui_claim_{tag}_{nanos}"))
+            .join("out")
+    }
+
+    fn claim(dir: &Path, stem: &str, bytes: &[u8], cap: u64) -> Result<(String, PathBuf), String> {
+        claim_and_copy(
+            bytes,
+            &ClaimTarget {
+                dir,
+                name_stem: stem,
+                identity: "content://x/1",
+                ext: "png",
+                kind: SniffKind::Png,
+                cap,
+                reserved: &[],
+            },
+        )
+    }
+
+    #[test]
+    fn claim_and_copy_creates_the_dir_and_appends_the_extension() {
+        let dir = claim_dir("ok");
+        let (stem, path) = claim(&dir, "beach", PNG, 1024).unwrap();
+        assert_eq!(stem, "beach");
+        assert_eq!(path, dir.join("beach.png"));
+        assert_eq!(std::fs::read(&path).unwrap(), PNG);
+        std::fs::remove_dir_all(dir.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn claim_and_copy_moves_to_the_next_stem_when_taken() {
+        let dir = claim_dir("taken");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("beach.png"), b"old").unwrap();
+        let (stem, path) = claim(&dir, "beach", PNG, 1024).unwrap();
+        assert_ne!(stem, "beach");
+        assert_eq!(std::fs::read(dir.join("beach.png")).unwrap(), b"old");
+        assert_eq!(std::fs::read(path).unwrap(), PNG);
+        std::fs::remove_dir_all(dir.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn claim_and_copy_leaves_no_file_on_a_bad_signature_or_oversize() {
+        let dir = claim_dir("bad");
+        assert!(claim(&dir, "a", b"not an image at all", 1024).is_err());
+        assert!(claim(&dir, "b", PNG, 4).is_err());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir.parent().unwrap()).ok();
     }
 }

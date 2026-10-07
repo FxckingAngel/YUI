@@ -6,7 +6,7 @@
  */
 
 import { vi } from "vitest";
-import type { AvatarOption } from "../../config/load";
+import type { AvatarOption } from "../../config/validators/avatar/types";
 import { createVrmSelection } from "../../io/assets/vrm-selection";
 import {
   createSpeakerSelection,
@@ -19,10 +19,10 @@ import {
   createAgentSettings,
 } from "../../settings/backend/agent-settings";
 import {
+  createChatKeySettings,
   createSttKeySettings,
   createTtsKeySettings,
 } from "../../settings/backend/api-key-settings";
-import { createChatKeySettings } from "../../settings/backend/chat-key-settings";
 import { createEndpointsSettings } from "../../settings/backend/endpoints-settings";
 import { createWorkflowSettings } from "../../settings/backend/workflow-settings";
 import { createProactiveSettings } from "../../settings/cues/proactive-settings";
@@ -38,6 +38,24 @@ if (typeof (globalThis as { CSS?: { escape?: unknown } }).CSS?.escape !== "funct
       // biome-ignore lint/suspicious/noControlCharactersInRegex: the polyfill must match the C0 control range to escape it.
       String(value).replace(/[\x00-\x7f]/g, (ch) => (/[a-zA-Z0-9_-]/.test(ch) ? ch : `\\${ch}`)),
   };
+}
+
+// Counts the subscriptions a store hands out and how many of them are released.
+export function countSubscriptions(store: { subscribe(cb: never): () => void }): {
+  taken: number;
+  released: number;
+} {
+  const counts = { taken: 0, released: 0 };
+  const real = store.subscribe.bind(store) as (cb: unknown) => () => void;
+  vi.spyOn(store, "subscribe").mockImplementation(((cb: unknown) => {
+    counts.taken += 1;
+    const off = real(cb);
+    return () => {
+      counts.released += 1;
+      off();
+    };
+  }) as never);
+  return counts;
 }
 
 // In-memory AgentStorage so each test starts from a clean store.
@@ -77,13 +95,13 @@ export function makeSettings() {
   };
 }
 
-export function makeSourceProvider() {
+function makeSourceProvider() {
   return {
     listMonitors: async () => [],
   };
 }
 
-export function makeVoiceStatus() {
+function makeVoiceStatus() {
   return {
     get: () => ({
       state: "idle" as const,
@@ -175,5 +193,8 @@ export function defaultQcArgs(mount: HTMLElement) {
     pickVoiceImport: vi.fn(async () => null),
     commitVoiceImport: vi.fn(async () => {}),
     removeVoice: vi.fn(async () => {}),
+    canManageVoices: () => true,
+    canReuploadVoices: () => true,
+    canPasteVoiceId: () => false,
   };
 }

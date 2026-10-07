@@ -1,17 +1,15 @@
 /** Wires the stage's pointer gestures: taps, pats, the drag and the camera orbit. */
-import type { Tier1Engine } from "../../ambient/liveliness/tier1";
 import type { AppConfig } from "../../config/load";
 import type { SignalGroup } from "../../contract";
 import type { EventBus } from "../../dispatcher/core/event-bus";
-import { createDragHoldSource } from "../../dispatcher/sources/drag-hold-source";
-import { createTapSource, type TapSource } from "../../dispatcher/sources/tap-source";
-import { initDrag, type PatGesture } from "../../io/window/pet/drag";
+import { createDragHoldSource } from "../../dispatcher/sources/gesture/drag-hold-source";
+import { createTapSource, type TapSource } from "../../dispatcher/sources/gesture/tap-source";
+import type { PatGesture } from "../../io/window/pet/gesture/click-gesture";
+import { initDrag } from "../../io/window/pet/gesture/window-drag";
 import type { HitTestController } from "../../io/window/pet/hit-test";
 import type { Renderer } from "../../renderer";
-import {
-  CAMERA_ORBIT_SENSITIVITY,
-  type createCameraSettings,
-} from "../../settings/avatar/camera-settings";
+import { orbitCamera } from "../../settings/avatar/camera-gestures";
+import type { createCameraSettings } from "../../settings/avatar/camera-settings";
 import type { wireLocomotion } from "./wire-locomotion";
 
 /**
@@ -46,7 +44,6 @@ export async function wireStageGestures(deps: {
   stage: HTMLElement;
   bus: EventBus;
   renderer: Renderer;
-  ambient: Pick<Tier1Engine, "trigger">;
   getConfig: () => AppConfig;
   drainSignals: () => SignalGroup[];
   hitTest: Pick<HitTestController, "suspend" | "resume">;
@@ -61,7 +58,6 @@ export async function wireStageGestures(deps: {
     stage,
     bus,
     renderer,
-    ambient,
     getConfig,
     drainSignals,
     hitTest,
@@ -73,7 +69,6 @@ export async function wireStageGestures(deps: {
   const tapSource = createTapSource({
     bus,
     renderer,
-    ambient,
     config: getConfig().avatar.tap,
     drainSignals,
   });
@@ -92,16 +87,14 @@ export async function wireStageGestures(deps: {
     }),
     onDragStart: () => {
       locomotion.setDragging(true);
+      locomotion.dropSource.noteUserDrag();
       locomotion.cancel();
       hitTest.suspend();
       dragHold.noteDragStart();
-      locomotion.dropSource.noteUserDrag();
       bus.push({
         source: "os_event_watcher",
         event_name: "user.drag_start",
         ts: Date.now(),
-        hint_tier: 1,
-        dnd_override: true,
       });
       // A cancelled climb or stroll may still be unparking its travel; the native
       // drag waits for this before it can grab the window.
@@ -116,17 +109,11 @@ export async function wireStageGestures(deps: {
         source: "os_event_watcher",
         event_name: "user.drag_end",
         ts: Date.now(),
-        hint_tier: 1,
-        dnd_override: true,
       });
     },
     onOrbitStart: hitTest.suspend,
     onOrbitEnd: hitTest.resume,
-    onOrbit: ({ dx, dy }) => {
-      const current = cameraSettings.get();
-      cameraSettings.setAzimuth(current.azimuth + dx * CAMERA_ORBIT_SENSITIVITY);
-      cameraSettings.setPolar(current.polar - dy * CAMERA_ORBIT_SENSITIVITY);
-    },
+    onOrbit: (d) => orbitCamera(cameraSettings, d),
   });
   register(cleanupDrag);
 }

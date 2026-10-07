@@ -12,8 +12,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { EndpointsConfig } from "../../contract";
-import type { ChatHistoryEntry } from "../../io/chat/chat-history-store";
-import type { PushTurnFrame } from "../../io/chat/push-socket";
+import type { ChatHistoryEntry } from "../../io/chat/conversation/chat-history-store";
+import type { PushTurnFrame } from "../../io/chat/push/push-frames";
 import type { Logger } from "../../logger";
 import type { BusEnvelope } from "../core/event-bus";
 import { CONFIG, makeLogger, makeTurnOutput, touchEnv, turnOf, userEnv } from "../test-helpers";
@@ -30,7 +30,6 @@ function scheduleEnv(): BusEnvelope {
     event_name: "schedule.morning",
     ts: 1_717_000_000_000,
     payload: { cue_id: "morning", label: "morning check-in" },
-    hint_tier: 2,
   };
 }
 
@@ -148,7 +147,7 @@ function callerWith(accepted: boolean, config: EndpointsConfig = PUSH_CONFIG) {
     },
     onPushSocketNotReady: (cb) => socket.subscribe(cb),
     turnFeed: createTurnFeed({ onToolStatus: () => {}, reasoning }),
-    reportSpokeText: (v) => spoke.push(v),
+    reportSpokeText: (_turnId, v) => spoke.push(v),
     contextHistory: { append: (entry) => contexts.push(entry) },
     appendTurnRecord: (record) => records.push(record),
     logger,
@@ -180,7 +179,7 @@ describe("backend_caller — push transport", () => {
     expect(turnOutput.speak).not.toHaveBeenCalled();
     expect(turnOutput.delta).not.toHaveBeenCalled();
     expect(turnOutput.abort).not.toHaveBeenCalled();
-    expect(spoke).toEqual([false]);
+    expect(spoke).toEqual([]);
   });
 
   it("a turn the user typed stops the speech and the outstanding turns, before the context is built", async () => {
@@ -245,6 +244,19 @@ describe("backend_caller — push transport", () => {
     await callerWith(true).call(turnOf(userEnv("안녕"), 1));
 
     expect(transcript).toEqual([{ role: "user", text: "안녕", ts: expect.any(Number) }]);
+  });
+
+  it("stores the guide key on the user entry of a guide turn", async () => {
+    const env = {
+      ...userEnv("YUI 조작법 알려줘"),
+      payload: { text: "YUI 조작법 알려줘", guide: "controls" },
+    };
+
+    await callerWith(true).call(turnOf(env, 1));
+
+    expect(transcript).toEqual([
+      { role: "user", text: "YUI 조작법 알려줘", ts: expect.any(Number), guide: "controls" },
+    ]);
   });
 
   it("writes nothing to the transcript for a turn no user spoke", async () => {
@@ -454,7 +466,7 @@ describe("backend_caller — push transport, the turn stays open", () => {
 
     expect(turn.settled()).toBeNull();
     expect(sentIds).toEqual(["7"]);
-    expect(spoke).toEqual([false]);
+    expect(spoke).toEqual([]);
     expect(transcript).toEqual([{ role: "user", text: "안녕", ts: expect.any(Number) }]);
     expect(contexts).toHaveLength(1);
     expect(records).toHaveLength(1);

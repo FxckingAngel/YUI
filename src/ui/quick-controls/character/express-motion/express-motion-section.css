@@ -1,0 +1,86 @@
+/* Express motion section — category accordion + group master switch, rows of one group. Tokens in ../../../tokens.css. */
+
+/* ── Group header — expander on the left, whole-group switch on the right ── */
+.yui-express__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-right: 0.875rem;
+}
+
+.yui-express__toggle {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0.625rem 0 0.625rem 0.875rem;
+  border: 0;
+  background: none;
+  color: var(--yui-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.yui-express__toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--yui-accent-soft);
+}
+
+.yui-express__chev {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--yui-text-mute);
+  transition: transform var(--yui-dur-fast) var(--yui-ease);
+}
+
+.yui-express__chev.is-open {
+  transform: rotate(90deg);
+}
+
+.yui-express__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--yui-fs-body);
+  font-weight: 500;
+  color: var(--yui-text);
+}
+
+.yui-express__group.is-open .yui-express__name {
+  font-weight: 600;
+}
+
+.yui-express__count {
+  flex: 0 0 auto;
+  font-size: var(--yui-fs-caption);
+  color: var(--yui-text-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mixed — half the track lit, knob parked mid-travel. */
+.yui-express__master[aria-checked="mixed"] {
+  background: linear-gradient(90deg, var(--yui-accent) 50%, var(--yui-track) 50%);
+}
+
+.yui-express__master[aria-checked="mixed"]::after {
+  transform: translateX(calc((var(--w) - var(--h)) / 2));
+}
+
+/* Open group's motions — indented rows under the header, same hairline rhythm. */
+.yui-express__rows {
+  display: flex;
+  flex-direction: column;
+  padding-left: 1.5rem;
+}
+
+.yui-express__rows > * {
+  border-top: 1px solid var(--yui-edge);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yui-express__chev {
+    transition: none;
+  }
+}

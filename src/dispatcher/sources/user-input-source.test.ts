@@ -4,7 +4,7 @@
  * Locks:
  *  - submit(text) pushes a well-formed user.text_submitted envelope.
  *  - submitVoice(text) pushes a user.voice_segment_ready envelope with text payload.
- *  - voice envelope: source=user_input_source, dnd_override=true, hint_tier=2.
+ *  - voice envelope: source=user_input_source, dnd_override=true.
  *  - payload shape: { text }.
  */
 
@@ -35,7 +35,6 @@ describe("user_input_source — submit", () => {
     expect(e.source).toBe("user_input_source");
     expect(e.event_name).toBe("user.text_submitted");
     expect(e.dnd_override).toBe(true);
-    expect(e.hint_tier).toBe(2);
     expect(e.payload?.text).toBe("안녕");
     expect(typeof e.ts).toBe("number");
   });
@@ -104,7 +103,6 @@ describe("user_input_source — submitVoice", () => {
     expect(e.source).toBe("user_input_source");
     expect(e.event_name).toBe("user.voice_segment_ready");
     expect(e.dnd_override).toBe(true);
-    expect(e.hint_tier).toBe(2);
     expect(typeof e.ts).toBe("number");
     expect(e.payload?.text).toBe("こんにちは");
   });
@@ -122,5 +120,17 @@ describe("user_input_source — submitVoice", () => {
     const src = createUserInputSource(bus);
     src.submitVoice("  hello  ");
     expect(pushed[0].payload?.text).toBe("hello");
+  });
+});
+
+describe("user_input_source — submitGuide", () => {
+  it("pushes a user.text_submitted envelope whose payload carries the text and the guide key", () => {
+    const { bus, pushed } = fakeBus();
+    createUserInputSource(bus).submitGuide("controls", "YUI 조작법 알려줘");
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0].event_name).toBe("user.text_submitted");
+    expect(pushed[0].dnd_override).toBe(true);
+    expect(pushed[0].payload).toEqual({ text: "YUI 조작법 알려줘", guide: "controls" });
   });
 });

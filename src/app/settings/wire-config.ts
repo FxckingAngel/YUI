@@ -1,13 +1,9 @@
 /** The pet window's config store — bundled configs, runtime key overrides, and the live merges. */
 
-import {
-  CHAT_API_KEY_SECRET,
-  type GuardrailsConfig,
-  STT_API_KEY_SECRET,
-  TTS_API_KEY_SECRET,
-} from "../../config/load";
+import { CHAT_API_KEY_SECRET, STT_API_KEY_SECRET, TTS_API_KEY_SECRET } from "../../config/secrets";
 import type { ConfigStore } from "../../config/store";
 import { createConfigStore } from "../../config/store";
+import type { GuardrailsConfig } from "../../config/validators/guardrails";
 import type { EndpointsConfig } from "../../contract";
 import { createSettingsSecretProvider } from "../../io/chat/secret-provider";
 import type { Logger } from "../../logger";
@@ -18,6 +14,7 @@ import { mergeGuardrails } from "../../settings/backend/guardrails-settings";
 import type { SettingsStores } from "../../settings/settings-stores";
 import type { Surfaces } from "../../ui/surfaces/surfaces";
 import type { ConfiguredBootstrapHandles } from "../bootstrap-configured";
+import { devKeyFallback } from "./dev-key-fallback";
 import type { wireVrmSelection } from "./wire-avatar";
 
 export function createPetConfig(deps: {
@@ -32,6 +29,7 @@ export function createPetConfig(deps: {
   getEndpoints(): EndpointsConfig;
   getGuardrails(): GuardrailsConfig;
 } {
+  const devKeys = devKeyFallback();
   const config = createConfigStore({
     secrets: createSettingsSecretProvider({
       stores: {
@@ -39,33 +37,17 @@ export function createPetConfig(deps: {
         [STT_API_KEY_SECRET]: deps.sttKeySettings,
         [TTS_API_KEY_SECRET]: deps.ttsKeySettings,
       },
-      fallback: {
-        [CHAT_API_KEY_SECRET]: import.meta.env.VITE_YUI_CHAT_KEY,
-        [STT_API_KEY_SECRET]: import.meta.env.VITE_YUI_STT_KEY,
-        [TTS_API_KEY_SECRET]: import.meta.env.VITE_YUI_TTS_KEY,
-      },
+      fallback: devKeys,
     }),
   });
   // No runtime override + no build-time key → the call looks like a silent 401 → warn early. Never log the key itself.
-  if (
-    import.meta.env.DEV &&
-    !deps.chatKeySettings.get().apiKey &&
-    !import.meta.env.VITE_YUI_CHAT_KEY
-  ) {
+  if (import.meta.env.DEV && !deps.chatKeySettings.get().apiKey && !devKeys[CHAT_API_KEY_SECRET]) {
     deps.log.warn("chat_key_missing", { env: "VITE_YUI_CHAT_KEY" });
   }
-  if (
-    import.meta.env.DEV &&
-    !deps.sttKeySettings.get().apiKey &&
-    !import.meta.env.VITE_YUI_STT_KEY
-  ) {
+  if (import.meta.env.DEV && !deps.sttKeySettings.get().apiKey && !devKeys[STT_API_KEY_SECRET]) {
     deps.log.warn("stt_key_missing", { env: "VITE_YUI_STT_KEY" });
   }
-  if (
-    import.meta.env.DEV &&
-    !deps.ttsKeySettings.get().apiKey &&
-    !import.meta.env.VITE_YUI_TTS_KEY
-  ) {
+  if (import.meta.env.DEV && !deps.ttsKeySettings.get().apiKey && !devKeys[TTS_API_KEY_SECRET]) {
     deps.log.warn("tts_key_missing", { env: "VITE_YUI_TTS_KEY" });
   }
   return {
@@ -79,8 +61,8 @@ export function createPetConfig(deps: {
 
 /**
  * Config hot-reload → live surfaces: per-section re-apply of emotions, motions, guardrails,
- * hotkeys, endpoints, and the avatar. Returns the subscription's own disposer for the composer
- * to register.
+ * hotkeys, the broker vocabulary, and the avatar. Returns the subscription's own disposer for the
+ * composer to register.
  */
 export function wireConfigReload(deps: {
   config: Pick<ConfigStore, "subscribe">;
@@ -102,7 +84,6 @@ export function wireConfigReload(deps: {
     broker: Pick<ConfiguredBootstrapHandles["broker"], "onConfigChange">;
   };
   vrm: Pick<ReturnType<typeof wireVrmSelection>, "vrmSelection" | "loadVrmSerialized">;
-  refreshVoiceList: () => Promise<void>;
   log: Pick<Logger, "error">;
 }): () => void {
   return deps.config.subscribe((cfg, changed) => {
@@ -121,7 +102,6 @@ export function wireConfigReload(deps: {
       deps.surfaces.setAttachmentLimits(cfg.guardrails.attachments);
     }
     if (changed.has("hotkeys")) void deps.configured.summonHotkey.apply(cfg.hotkeys.summon_global);
-    if (changed.has("endpoints")) void deps.refreshVoiceList();
     deps.configured.broker.onConfigChange(cfg, changed);
     if (!changed.has("avatar")) return;
     deps.renderer.setFraming(cfg.avatar.framing);

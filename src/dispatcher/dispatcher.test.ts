@@ -9,9 +9,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PeekConfig, TapConfig } from "../config/load";
+import type { PeekConfig, TapConfig } from "../config/validators/avatar/types";
 import type { Logger } from "../logger";
-import type { BackendCaller } from "./backend/backend-caller";
+import type { BackendCaller, TurnFailure } from "./backend/backend-caller";
 import { createEventBus, type EventBus } from "./core/event-bus";
 import { createGuardrails, type Guardrails } from "./core/guardrails";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
@@ -23,8 +23,10 @@ import {
   NOW,
   permissiveGuardrailsConfig,
   realGuardrailsConfig,
+  userEnv,
 } from "./test-helpers";
-import { createTurnLog, type TurnLog } from "./turn/turn";
+import { createQuotedTurn } from "./turn/quoted-turn";
+import { createTurnLog, type Turn, type TurnLog } from "./turn/turn";
 
 const PEEK_CONFIG: PeekConfig = {
   side_out_frac: 0.28,
@@ -66,6 +68,9 @@ let dispatcher: Dispatcher;
 let logger: Logger;
 let turnLog: TurnLog;
 let speaking: boolean;
+// Reassigned by a test before start(); the shared dispatcher reads them through these.
+let onAdmitted: (turn: Turn) => void;
+let onFailed: (turn: Turn, reason: TurnFailure) => void;
 
 /**
  * Simulates "audio is still playing" the way the speech pipeline does: it answers the dispatcher
@@ -100,6 +105,8 @@ beforeEach(() => {
   logger = makeLogger();
   turnLog = createTurnLog();
   speaking = false;
+  onAdmitted = () => {};
+  onFailed = () => {};
   const deps = {
     bus,
     renderer: renderer as never,
@@ -111,6 +118,8 @@ beforeEach(() => {
     logger,
     peekConfig: () => PEEK_CONFIG,
     tapConfig: () => TAP_CONFIG,
+    onTurnAdmitted: (turn: Turn) => onAdmitted(turn),
+    onTurnFailed: (turn: Turn, reason: TurnFailure) => onFailed(turn, reason),
   };
   dispatcher = createDispatcher(deps);
 });
@@ -151,7 +160,6 @@ describe("dispatcher — state machine (§9)", () => {
           ts: NOW + i,
           dnd_override: false,
         }),
-        2,
       );
     }
     // let the running pump interval observe cooldownActive() and sync state.
@@ -194,7 +202,7 @@ describe("dispatcher — state machine (§9)", () => {
 
 describe("dispatcher — posture", () => {
   async function pushPostureEvent(event_name: string, payload?: Record<string, unknown>) {
-    bus.push(env({ event_name, hint_tier: 1, payload }));
+    bus.push(env({ event_name, payload }));
     await vi.advanceTimersByTimeAsync(20);
   }
 
@@ -477,7 +485,6 @@ describe("dispatcher — observable dev APIs (§11)", () => {
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -499,7 +506,7 @@ describe("dispatcher — cancel() + subscribeBusy (chat stop button)", () => {
     expect(dispatcher.inFlight()).toBeNull();
   });
 
-  it("cancel() drops pending tier2/3 with superseded_by_user", async () => {
+  it("cancel() drops pending tier2 with superseded_by_user", async () => {
     dispatcher.start();
     // occupy in-flight
     bus.push(env({ ts: NOW }));
@@ -510,7 +517,6 @@ describe("dispatcher — cancel() + subscribeBusy (chat stop button)", () => {
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -561,7 +567,6 @@ describe("dispatcher — cancel() + subscribeBusy (chat stop button)", () => {
       env({
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -592,7 +597,6 @@ describe("dispatcher — cancel() + subscribeBusy (chat stop button)", () => {
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -671,7 +675,6 @@ describe("dispatcher — isPipelineBusy/subscribePipelineBusy (busy = ledger not
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -708,7 +711,6 @@ describe("dispatcher — isPipelineBusy/subscribePipelineBusy (busy = ledger not
         source: "os_event_watcher",
         event_name: "proactive.tap_bored",
         ts: NOW,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -717,7 +719,6 @@ describe("dispatcher — isPipelineBusy/subscribePipelineBusy (busy = ledger not
         source: "os_event_watcher",
         event_name: "proactive.drag_held",
         ts: NOW + 1,
-        hint_tier: 2,
         dnd_override: false,
       }),
     );
@@ -729,5 +730,74 @@ describe("dispatcher — isPipelineBusy/subscribePipelineBusy (busy = ledger not
     await vi.advanceTimersByTimeAsync(20);
 
     expect(seen).toEqual([true]);
+  });
+});
+
+describe("dispatcher — the admitted turn and the quoted-turn ledger", () => {
+  function wireQuote() {
+    const surfaces = {
+      quoteUser: vi.fn(),
+      settleQuote: vi.fn(),
+      clearQuote: vi.fn(),
+      restoreInput: vi.fn(),
+    };
+    const quoted = createQuotedTurn({ surfaces, turnLog });
+    onAdmitted = quoted.admitted;
+    onFailed = (turn) => quoted.failed(turn);
+    return surfaces;
+  }
+
+  it("reports the admitted turn before the backend call, with its trigger", async () => {
+    const spy = vi.fn();
+    onAdmitted = spy;
+    dispatcher.start();
+
+    bus.push(userEnv("hi"));
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const turn = spy.mock.calls[0][0] as Turn;
+    expect(turn.trigger.payload?.text).toBe("hi");
+    expect(turn.id).toBe(turnLog.current()!.id);
+    expect(spy.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(backendCaller.call).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("a user turn that settles without speech flips the ledger over once", async () => {
+    const surfaces = wireQuote();
+    dispatcher.start();
+
+    bus.push(userEnv("hi"));
+    await vi.advanceTimersByTimeAsync(20);
+    callDeferred[0].resolve("ok");
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(surfaces.quoteUser).toHaveBeenCalledTimes(1);
+    expect(surfaces.settleQuote).toHaveBeenCalledTimes(1);
+    expect(surfaces.restoreInput).not.toHaveBeenCalled();
+  });
+
+  it("a pending proactive turn admitted at settlement settles the quote once", async () => {
+    const surfaces = wireQuote();
+    dispatcher.start();
+
+    bus.push(userEnv("hi"));
+    await vi.advanceTimersByTimeAsync(20);
+    bus.push(
+      env({
+        source: "os_event_watcher",
+        event_name: "proactive.tap_bored",
+        ts: NOW + 1,
+        dnd_override: false,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(20);
+    callDeferred[0].resolve("ok");
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(callDeferred).toHaveLength(2);
+    expect(surfaces.settleQuote).toHaveBeenCalledTimes(1);
+    expect(surfaces.clearQuote).not.toHaveBeenCalled();
   });
 });

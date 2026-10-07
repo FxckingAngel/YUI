@@ -10,7 +10,8 @@
  */
 
 import "./delegation-chip.css";
-import type { DelegationItem, PushSocketState } from "../../io/chat/push-socket";
+import type { DelegationItem } from "../../io/chat/push/push-frames";
+import type { PushSocketState } from "../../io/chat/push/push-socket";
 import type { DelegationChipSettingsStore } from "../../settings/panels/delegation-chip-settings";
 import { subscribe as subscribeLocale, t } from "../i18n";
 import { afterFadeOut } from "../notices/fade-out";
@@ -43,7 +44,7 @@ interface DelegationChipOptions {
    */
   pushState: PushStatePort;
   /** Opens the settings window at the chat section — what a tap does while the connection is lost. */
-  onOpenSettings(): void;
+  onOpenSettings: () => void;
   /** Starts hidden, for a window that has nothing to report yet. */
   suppressed?: boolean;
   now?: () => number;
@@ -53,10 +54,6 @@ export interface DelegationChip {
   el: HTMLElement;
   /** Hides the chip entirely — the popped-out surfaces carry it instead. */
   setSuppressed(suppressed: boolean): void;
-  /** Closes the open list — the reasoning chip's panel opened instead. */
-  closeList(): void;
-  /** Fires once per closed → open list transition. Returns its unsubscriber. */
-  onListOpen(cb: () => void): () => void;
   dispose(): void;
 }
 
@@ -98,7 +95,6 @@ export function createDelegationChip({
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let cancelListFade: (() => void) | null = null;
   let cancelHideFade: (() => void) | null = null;
-  const listOpenSubs = new Set<() => void>();
 
   function clearRefreshTimer(): void {
     if (refreshTimer !== null) {
@@ -119,7 +115,6 @@ export function createDelegationChip({
     listEl.hidden = false;
     requestAnimationFrame(() => listEl.classList.add("is-open"));
     document.addEventListener("keydown", onListKeydown);
-    for (const cb of [...listOpenSubs]) cb();
   }
 
   function closeList(): void {
@@ -274,7 +269,6 @@ export function createDelegationChip({
     unsubscribePushState();
     unsubscribeCollapsed();
     unsubscribeLocale();
-    listOpenSubs.clear();
     chipBtn.removeEventListener("pointerdown", onPointerDown);
     chipBtn.removeEventListener("pointerup", onPointerEnd);
     chipBtn.removeEventListener("pointercancel", onPointerEnd);
@@ -289,13 +283,6 @@ export function createDelegationChip({
       if (suppressed === next) return;
       suppressed = next;
       refresh();
-    },
-    closeList,
-    onListOpen(cb): () => void {
-      listOpenSubs.add(cb);
-      return () => {
-        listOpenSubs.delete(cb);
-      };
     },
     dispose,
   };

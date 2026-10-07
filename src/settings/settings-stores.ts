@@ -13,8 +13,12 @@ import {
   localStorageAgentNotifyStorage,
 } from "./backend/agent-notify-settings";
 import { createAgentSettings, localStorageAgentStorage } from "./backend/agent-settings";
-import { createSttKeySettings, createTtsKeySettings } from "./backend/api-key-settings";
-import { createChatKeySettings, localStorageChatKeyStorage } from "./backend/chat-key-settings";
+import {
+  createChatKeySettings,
+  createSttKeySettings,
+  createTtsKeySettings,
+  localStorageChatKeyStorage,
+} from "./backend/api-key-settings";
 import {
   createEndpointsSettings,
   localStorageEndpointsStorage,
@@ -36,7 +40,6 @@ import {
   createMessageWindowSettings,
   localStorageMessageWindowStorage,
 } from "./panels/message-window-settings";
-import { createSectionsSettings, localStorageSectionsStorage } from "./panels/sections-settings";
 import {
   createClampedIntSettings,
   createFlagSettings,
@@ -145,14 +148,6 @@ export function createSettingsStores(opts?: { locale?: CueLocale }) {
   // First-run onboarding hint — flag shown only once.
   // enabled === onboarding hint already seen.
   const hintSettings = createFlagSettings(false, { storage: localStorageStore("yui.hint") });
-  // enabled === rail is collapsed.
-  const railCollapsedSettings = createFlagSettings(false, {
-    storage: localStorageStore("yui.quickControls.railCollapsed"),
-  });
-  // Quick Controls collapsible sections: ids the user closed. Absent ⇒ open (today's layout).
-  const sectionsSettings = createSectionsSettings({
-    storage: localStorageSectionsStorage(),
-  });
   // User-edited guardrail rate-limit caps: localStorage overrides the bundled config (0 = fallback).
   const guardrailsSettings = createGuardrailsSettings({
     storage: localStorageGuardrailsStorage(),
@@ -194,8 +189,6 @@ export function createSettingsStores(opts?: { locale?: CueLocale }) {
     climbSettings,
     fallSettings,
     hintSettings,
-    railCollapsedSettings,
-    sectionsSettings,
     guardrailsSettings,
     idleMotionSettings,
     expressMotionSettings,
@@ -242,8 +235,6 @@ export const SYNC_MODE: Record<keyof SettingsStores, SyncMode> = {
   climbSettings: "broadcast",
   fallSettings: "broadcast",
   hintSettings: "local",
-  railCollapsedSettings: "broadcast",
-  sectionsSettings: "broadcast",
   guardrailsSettings: "broadcast",
   idleMotionSettings: "broadcast",
   expressMotionSettings: "broadcast",

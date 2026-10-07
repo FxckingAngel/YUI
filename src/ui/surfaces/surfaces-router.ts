@@ -3,13 +3,13 @@
  * message window's, reached over the bridge.
  *
  * Every consumer keeps its single `Surfaces` handle: the router picks the side
- * the current mode names for the bubble and the input, and keeps the tool chip,
+ * the current mode names for the bubble and the input, and keeps tool status,
  * the feet anchor and the overlay element local, since those belong to the
  * character. Submit and stop callbacks are registered once here and fire
  * whichever side the user typed on.
  */
 
-import type { RemoteSurfaces } from "../../io/bridge/message-remote";
+import type { RemoteSurfaces } from "../../io/bridge/message/message-remote";
 import type { MessageWindowMode } from "../../settings/panels/message-window-settings";
 import type { Surfaces } from "./surfaces";
 
@@ -28,11 +28,18 @@ export function createSurfacesRouter({
 }: SurfacesRouterOptions): Surfaces {
   const speech = (): Pick<
     Surfaces,
-    "beginSpeech" | "pushSpeech" | "endSpeech" | "finishSpeech" | "hideSpeech"
+    | "beginSpeech"
+    | "pushSpeech"
+    | "endSpeech"
+    | "finishSpeech"
+    | "hideSpeech"
+    | "quoteUser"
+    | "settleQuote"
+    | "clearQuote"
   > => (getMode() === "popped" ? remote : local);
   const input = (): Pick<
     Surfaces,
-    "summonInput" | "dismissInput" | "isInputOpen" | "setInputEnabled" | "showInputError"
+    "summonInput" | "dismissInput" | "isInputOpen" | "showInputError" | "restoreInput"
   > => (getMode() === "popped" ? remote : local);
 
   // Speech left behind on the side being abandoned would hang there with nothing to dismiss it,
@@ -60,6 +67,9 @@ export function createSurfacesRouter({
     endSpeech: (opts) => speech().endSpeech(opts),
     finishSpeech: () => speech().finishSpeech(),
     hideSpeech: () => speech().hideSpeech(),
+    quoteUser: (quote) => speech().quoteUser(quote),
+    settleQuote: () => speech().settleQuote(),
+    clearQuote: () => speech().clearQuote(),
 
     showTool: local.showTool,
     finishTool: local.finishTool,
@@ -68,13 +78,13 @@ export function createSurfacesRouter({
     summonInput: () => input().summonInput(),
     dismissInput: () => input().dismissInput(),
     isInputOpen: () => input().isInputOpen(),
-    setInputEnabled: (enabled) => input().setInputEnabled(enabled),
     // Busy and the attachment limits go to both sides, so the side a mode flip reveals is current.
     setBusy(busy) {
       local.setBusy(busy);
       remote.setBusy(busy);
     },
     showInputError: (message, action) => input().showInputError(message, action),
+    restoreInput: (text, images) => input().restoreInput(text, images),
     setAttachmentLimits(limits) {
       local.setAttachmentLimits(limits);
       remote.setAttachmentLimits(limits);

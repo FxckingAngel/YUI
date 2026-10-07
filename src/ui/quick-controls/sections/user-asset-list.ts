@@ -39,7 +39,7 @@ export interface UserAssetListConfig<T extends UserAssetOption> {
   /** Log event key prefix — resolves `${prefix}_rename`, `${prefix}_delete`, `${prefix}_delete_failed`, `${prefix}_fallback_swap_failed`, `${prefix}_import_failed`, `${prefix}_swap`, `${prefix}_swap_failed`. */
   logPrefix: string;
   log: Logger;
-  refreshTooltip: () => void;
+  refreshTooltip?: () => void;
 
   list: () => T[];
   getActiveId: () => string;
@@ -53,6 +53,8 @@ export interface UserAssetListConfig<T extends UserAssetOption> {
   swap: (option: T) => Promise<void>;
   /** Predicts the native id a typed name imports under (sanitizeStem for VRM, voiceIdFromName for speaker) — drives the pending-import naming row's overwrite warning (the two-phase pickImport/commitImport path). */
   deriveId: (name: string) => string;
+  /** An id the import may not take (held elsewhere) — the naming row warns with `${ns}.import_taken_warn` and Enter keeps it open. */
+  isImportBlocked?: (id: string) => boolean;
   /** One-shot import flow (VRM): file select → copy/load → addOption + select. Mutually exclusive with pickImport/commitImport. */
   importFn?: () => Promise<void>;
   /** Two-phase import pick step (speaker): opens the file picker, returns the source path + a naming-row seed (null on cancel). */
@@ -64,6 +66,9 @@ export interface UserAssetListConfig<T extends UserAssetOption> {
   /** Per-domain DOM tweak right after a row is marked aria-busy for swap, before the "swapping…" hint (speaker removes its preview button). */
   onRowBusy?: (row: HTMLElement) => void;
 }
+
+export const RENAME_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
+export const REMOVE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>`;
 
 /** Roving tabindex resolution: prioritizes the last roved row, falls back to active if it's gone from the list. */
 export function resolveRovedId(roved: string | null, ids: string[], activeId: string): string {
@@ -174,9 +179,13 @@ export function createUserAssetList<T extends UserAssetOption>(cfg: UserAssetLis
     const baseHint = hintEl.innerHTML;
     const syncOverwriteWarning = (): void => {
       const id = cfg.deriveId(input.value);
-      const collides = cfg.list().some((o) => o.id === id);
-      hintEl.innerHTML = collides
-        ? `${baseHint} · <span class="${overwriteWarnClass}">${t(`${cfg.i18nNamespace}.import_overwrite_warn`)}</span>`
+      const warnKey = cfg.isImportBlocked?.(id)
+        ? "import_taken_warn"
+        : cfg.list().some((o) => o.id === id)
+          ? "import_overwrite_warn"
+          : null;
+      hintEl.innerHTML = warnKey
+        ? `${baseHint} · <span class="${overwriteWarnClass}">${t(`${cfg.i18nNamespace}.${warnKey}`)}</span>`
         : baseHint;
     };
     syncOverwriteWarning();
@@ -218,7 +227,7 @@ export function createUserAssetList<T extends UserAssetOption>(cfg: UserAssetLis
     if (button) {
       button.dataset.tip = t(`${cfg.i18nNamespace}.remove`);
       button.setAttribute("aria-label", t(`${cfg.i18nNamespace}.remove`));
-      cfg.refreshTooltip();
+      cfg.refreshTooltip?.();
     }
   }
 
@@ -326,6 +335,7 @@ export function createUserAssetList<T extends UserAssetOption>(cfg: UserAssetLis
   // (performed by cfg.commitImport). Failure shows the inline error, same as the one-shot flow.
   async function commitPendingImport(name: string): Promise<void> {
     if (importing || pendingImport === null) return; // Reentrancy guard (see below for why it holds)
+    if (cfg.isImportBlocked?.(cfg.deriveId(name))) return; // the warning stays; the row stays open
     const picked = pendingImport;
     // Clear BEFORE the first render — mirrors commitRename clearing renamingId before its render.
     // cfg.render() (next line) replaces the naming row's innerHTML, detaching the still-focused

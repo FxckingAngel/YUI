@@ -3,7 +3,9 @@
  * known-good file bundle + in-memory ConfigReader. Mirrors the real configs/*.json shape.
  */
 
-import type { AvatarConfig, ConfigReader, GuardrailsConfig } from "./load";
+import type { ConfigReader } from "./load";
+import type { AvatarConfig } from "./validators/avatar/types";
+import type { GuardrailsConfig } from "./validators/guardrails";
 
 // ── fixtures (mirror the real configs/*.json) ─────────────────────────────────
 
@@ -11,7 +13,7 @@ import type { AvatarConfig, ConfigReader, GuardrailsConfig } from "./load";
 export function avatarFixture(): AvatarConfig {
   return {
     vrm_url: "/vrms/carlotta.vrm",
-    framing: { margin: 0.1, fov: 30 },
+    framing: { margin: 0.1, fov: 30, upper_body: { from_frac: 0.4, to_frac: 1 } },
     hit_test: {
       hysteresis_margin_px: 8,
       poll_interval_ms: 33,
@@ -112,7 +114,6 @@ export function guardrailsFixture(): GuardrailsConfig {
     rate_limit: {
       window_ms: 3600000,
       tier2_max: 6,
-      tier3_max: 2,
       overall_max: 20,
       cooldown_ms: 300000,
     },

@@ -1,14 +1,12 @@
 /** Composes the travel frame, the five locomotion loops and the window sources into one handle. */
+import { wireClimber } from "../../ambient/locomotion/climb/wire-climb";
+import { wireFaller } from "../../ambient/locomotion/fall/wire-fall";
+import { wirePercher } from "../../ambient/locomotion/perch/wire-perch";
 import { createSitter, type Sitter } from "../../ambient/locomotion/sitter";
-import {
-  wireClimber,
-  wireFaller,
-  wirePercher,
-  wireStrollReflexCancel,
-  wireTravelFrame,
-  wireWalker,
-} from "../../ambient/locomotion/wire";
-import type { AppConfig, DescendConfig, FallConfig } from "../../config/load";
+import { wireTravelFrame } from "../../ambient/locomotion/travel/wire-travel-frame";
+import { wireStrollReflexCancel, wireWalker } from "../../ambient/locomotion/walk/wire-walk";
+import type { AppConfig } from "../../config/load";
+import type { DescendConfig, FallConfig } from "../../config/validators/avatar/types";
 import type { WindowRect } from "../../contract";
 import type { EventBus } from "../../dispatcher/core/event-bus";
 import type { Dispatcher } from "../../dispatcher/dispatcher";
@@ -19,7 +17,7 @@ import type { Logger } from "../../logger";
 import type { Renderer } from "../../renderer";
 import type { createAgentNotifySettings } from "../../settings/backend/agent-notify-settings";
 import type { FlagSettingsStore } from "../../settings/persisted-store";
-import { wireWindowSources } from "../turn/wire-sources";
+import { wireWindowSources } from "./wire-window-sources";
 
 /** With the fall off, a perched stroll never steps off the ledge: nothing would catch her. */
 export function fallConfigFor(fall: FallConfig, enabled: boolean): FallConfig {
@@ -52,6 +50,7 @@ export function wireLocomotion(deps: {
   dispatcher: Dispatcher;
   hitTest: Pick<HitTestController, "setMoving">;
   peekActive: () => boolean;
+  isPanelOpen: () => boolean;
   fallSettings: FlagSettingsStore;
   climbSettings: FlagSettingsStore;
   agentNotifySettings: ReturnType<typeof createAgentNotifySettings>;
@@ -107,6 +106,7 @@ export function wireLocomotion(deps: {
     getMotionKind: (id) => getConfig().motions[id]?.kind,
     isPeeking: () => peekActive(),
     isDragging: () => dragging,
+    isPanelOpen: deps.isPanelOpen,
     setHitTestMoving: (moving) => hitTest.setMoving(moving),
     onStrollEnd,
     onDescend: (edge) => climberRef?.descend(edge),
@@ -168,6 +168,7 @@ export function wireLocomotion(deps: {
       return travelFrame.abort();
     },
     onDragMiss: () => faller.drop({ landOnSeam: true }),
+    onRelocated: () => faller.drop({ landOnSeam: true }),
     onSitLost: createSitLossFall({ getClimber: () => climberRef, faller }),
     sitDown: () => sitter.sitDown(null),
     log,

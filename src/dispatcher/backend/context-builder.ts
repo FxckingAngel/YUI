@@ -2,10 +2,12 @@ import type {
   BodyState,
   ClientContext,
   FrontmostState,
+  GuideKey,
   InputContext,
   PreviousTurn,
   TriggerMeta,
 } from "../../contract";
+import { isGuideKey } from "../../io/guide/guide-docs";
 import type { BusEnvelope } from "../core/event-bus";
 
 interface ContextProviders {
@@ -27,11 +29,18 @@ export function userTextOf(env: BusEnvelope): string | undefined {
   return typeof text === "string" ? text : undefined;
 }
 
-function userImagesOf(env: BusEnvelope): string[] | undefined {
+/** The images the user attached on this turn, absent when none came with it. */
+export function userImagesOf(env: BusEnvelope): string[] | undefined {
   const images = env.payload?.images;
   return Array.isArray(images) && images.every((url) => typeof url === "string")
     ? (images as string[])
     : undefined;
+}
+
+/** The guide the user's help button named on this turn. */
+export function guideKeyOf(env: BusEnvelope): GuideKey | undefined {
+  const guide = env.payload?.guide;
+  return isGuideKey(guide) ? guide : undefined;
 }
 
 function agentOf(env: BusEnvelope): TriggerMeta["agent"] | undefined {
@@ -217,8 +226,6 @@ export function buildClientContext(
       ? {
           label: payload.label,
           ...(typeof payload.context === "string" ? { context: payload.context } : {}),
-          ...(typeof payload.local_time === "string" ? { local_time: payload.local_time } : {}),
-          ...(typeof payload.idle_min === "number" ? { idle_min: payload.idle_min } : {}),
         }
       : undefined;
   const gapMs = typeof payload?.gap_ms === "number" ? payload.gap_ms : undefined;
@@ -227,6 +234,7 @@ export function buildClientContext(
   const milestone = milestoneOf(env);
   const signals = signalsOf(env);
   const screen = screenOf(env);
+  const guide = guideKeyOf(env);
   const screenshot = ctx.screenshot
     ? { enabled: ctx.screenshot.enabled, source: ctx.screenshot.source }
     : undefined;
@@ -244,6 +252,7 @@ export function buildClientContext(
     ...(badEnding ? { previous: badEnding } : {}),
     trigger: {
       kind: triggerKind(env.event_name),
+      ...(guide ? { guide } : {}),
       ...(cue ? { cue } : {}),
       ...(gapMs != null ? { idle_elapsed_min: Math.round(gapMs / 60_000) } : {}),
       ...(agent ? { agent } : {}),

@@ -4,19 +4,20 @@
  *
  * Every consumer keeps talking to a single `Surfaces`; the router sends the
  * bubble and input halves to whichever side the current mode names, keeps the
- * tool chip and the anchor local, and hides the surface on the side being left
+ * tool status and the anchor local, and hides the surface on the side being left
  * when the mode flips.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { guardrailsFixture } from "../../config/load-test-helpers";
-import { createMessageBridge } from "../../io/bridge/message-bridge";
-import { createRemoteSurfaces, type RemoteSurfaces } from "../../io/bridge/message-remote";
-import type { BridgeTransport } from "../../io/bridge/settings-bridge";
+import type { BridgeTransport } from "../../io/bridge/core/bridge-core";
+import { createMessageBridge } from "../../io/bridge/message/message-bridge";
+import { createRemoteSurfaces, type RemoteSurfaces } from "../../io/bridge/message/message-remote";
 import type { MessageWindowMode } from "../../settings/panels/message-window-settings";
 import { createMessagePlate } from "../message/message-plate";
 import { createSurfaces, type Surfaces } from "./surfaces";
 import { createSurfacesRouter } from "./surfaces-router";
+import { noTool } from "./test-helpers";
 
 /** The caps configs/guardrails.json delivers through setAttachmentLimits. */
 const LIMITS = guardrailsFixture().attachments;
@@ -29,6 +30,9 @@ function makeLocal(): Surfaces {
     endSpeech: vi.fn(),
     finishSpeech: vi.fn(),
     hideSpeech: vi.fn(),
+    quoteUser: vi.fn(),
+    settleQuote: vi.fn(),
+    clearQuote: vi.fn(),
     showTool: vi.fn(),
     finishTool: vi.fn(),
     hideTool: vi.fn(),
@@ -40,7 +44,7 @@ function makeLocal(): Surfaces {
     setBusy: vi.fn(),
     showInputError: vi.fn(),
     setAttachmentLimits: vi.fn(),
-    setInputEnabled: vi.fn(),
+    restoreInput: vi.fn(),
     setInputAnchor: vi.fn(),
     dispose: vi.fn(),
   };
@@ -53,13 +57,16 @@ function makeRemote(): RemoteSurfaces {
     endSpeech: vi.fn(),
     finishSpeech: vi.fn(),
     hideSpeech: vi.fn(),
+    quoteUser: vi.fn(),
+    settleQuote: vi.fn(),
+    clearQuote: vi.fn(),
     summonInput: vi.fn(),
     dismissInput: vi.fn(),
     isInputOpen: vi.fn(() => false),
-    setInputEnabled: vi.fn(),
     setBusy: vi.fn(),
     showInputError: vi.fn(),
     setAttachmentLimits: vi.fn(),
+    restoreInput: vi.fn(),
     onSubmit: vi.fn(),
     onStop: vi.fn(),
     onDock: vi.fn(),
@@ -133,11 +140,38 @@ describe("createSurfacesRouter", () => {
     expect(local.hideSpeech).not.toHaveBeenCalled();
   });
 
+  it("quoteUser, settleQuote and clearQuote reach the side the mode names", () => {
+    const quote = { text: "hi", via: "text" as const, images: 0 };
+    router.quoteUser(quote);
+    router.settleQuote();
+    router.clearQuote();
+    expect(local.quoteUser).toHaveBeenCalledWith(quote);
+    expect(local.settleQuote).toHaveBeenCalledTimes(1);
+    expect(local.clearQuote).toHaveBeenCalledTimes(1);
+
+    setMode("popped");
+    router.quoteUser(quote);
+    router.settleQuote();
+    router.clearQuote();
+    expect(remote.quoteUser).toHaveBeenCalledWith(quote);
+    expect(remote.settleQuote).toHaveBeenCalledTimes(1);
+    expect(remote.clearQuote).toHaveBeenCalledTimes(1);
+    expect(local.quoteUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("restoreInput reaches the input side the mode names", () => {
+    router.restoreInput("hi", []);
+    expect(local.restoreInput).toHaveBeenCalledWith("hi", []);
+
+    setMode("popped");
+    router.restoreInput("again", ["data:image/png;base64,AAAA"]);
+    expect(remote.restoreInput).toHaveBeenCalledWith("again", ["data:image/png;base64,AAAA"]);
+    expect(local.restoreInput).toHaveBeenCalledTimes(1);
+  });
+
   it("sends the input ops to the side the mode names", () => {
     router.summonInput();
-    router.setInputEnabled(false);
     expect(local.summonInput).toHaveBeenCalledTimes(1);
-    expect(local.setInputEnabled).toHaveBeenCalledWith(false);
 
     setMode("popped");
     router.summonInput();
@@ -344,7 +378,7 @@ describe("createSurfacesRouter over the message bridge", () => {
 
     /** The message window's surfaces and plate, wired to the bridge as its bootstrap does. */
     const mountMessageWindow = () => {
-      const surfaces = createSurfaces({ mount: document.createElement("div") });
+      const surfaces = createSurfaces({ tool: noTool, mount: document.createElement("div") });
       surfaces.onSubmit((text, images) =>
         messageBridge.emitControl({ op: "submit", text, images }),
       );

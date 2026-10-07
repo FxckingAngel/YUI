@@ -10,13 +10,13 @@
 
 **Auth.** The api-server key is its `API_SERVER_KEY` environment variable. YUI sends it as `Authorization: Bearer` from the chat key (settings override, else `VITE_YUI_CHAT_KEY` in `.env.local`). A local Hermes runs unauthenticated by default, so an empty key is normal and sends no header.
 
-**Dev proxy (web dev only, not Tauri).** In Responses mode the browser dev build rewrites the chat base URL to the same-origin mount `/__hermes`, and `vite.config.ts` proxies it to `http://localhost:8643` (avoids CORS preflight, keeps SSE streaming). Hermes allowlist-checks the `Origin` header, so the proxy overwrites `Origin` with `YUI_HERMES_ORIGIN` (default `http://localhost:1420`); set it when the dev server runs on another port.
+**Dev proxy (web dev only, not Tauri).** The browser dev build sends Responses-mode chat through the dev server's same-origin mount, which forwards to the configured chat base URL and removes the `Origin` header. The Hermes api-server serves a request without `Origin` and rejects an `Origin` that is not in `API_SERVER_CORS_ORIGINS`, so the dev server needs no entry there.
 
 ## Push mode
 
 Set `"chat_api": "push"` in `configs/endpoints.json`, or pick **Hermes Agent** in the settings panel's chat provider dropdown. The Hermes side of this mode is the platform plugin under `integrations/hermes/platform/yui/`, and `chat_base_url` is that plugin's WebSocket base: the client opens `<chat_base_url>/ws` and identifies itself with the key and a per-installation `chat_id`. The frames, the reconnect schedule and the size limits are in [docs/reference/push-transport.md](../../docs/reference/push-transport.md).
 
-The chat model row is not part of this mode — the plugin picks the model. The settings panel's chat section carries a connection line instead, naming the conversation while the socket is up and the close code when the backend refuses it.
+The chat model row is not part of this mode — the plugin picks the model. The settings panel's chat section carries a connection line instead, naming the conversation while the socket is up and stating that the backend refused the key when it closes with `4401`.
 
 ## Profile setup
 
@@ -28,4 +28,3 @@ The chat model row is not part of this mode — the plugin picks the model. The 
 
 - Protocol-level chat/STT/TTS/broker wiring: [docs/agent-guide/backend-integration.md](../../docs/agent-guide/backend-integration.md)
 - Hermes-side desire system: [desire/README.md](desire/README.md)
-- Dispatch skill: [skills/yui-dispatch/SKILL.md](skills/yui-dispatch/SKILL.md)

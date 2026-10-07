@@ -149,15 +149,6 @@ export interface ControlEnvelope {
   // --- Assembled from text stream (not a tool field) ---
   /** Accumulated response.output_text.delta. Empty string if no utterance. */
   speech_text: string;
-
-  // --- Derived from observation of the backend's native tool function_call items ---
-  tool_status?: ToolStatus | null;
-
-  /** All ignored in v0. */
-  _reserved?: {
-    expression_frames?: unknown[];
-    visemes?: unknown[];
-  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,8 +224,6 @@ export interface InputContext {
 export interface CueMeta {
   label: string;
   context?: string;
-  local_time?: string;
-  idle_min?: number;
 }
 
 /** one item in a signals.kind burst. heterogeneous by design — taxonomy owned by the signal producers and the backend, client forwards verbatim. */
@@ -248,11 +237,16 @@ export type SignalEnvelope = {
   occurred_at: number;
 };
 
-export type SignalGroup = { envelope?: SignalEnvelope; items: SignalItem[] };
+export type SignalGroup = { envelope: SignalEnvelope; items: SignalItem[] };
+
+/** A bundled guide doc the backend answers from. */
+export type GuideKey = "controls" | "capabilities";
 
 /** trigger envelope describing what fired this backend turn. */
 export interface TriggerMeta {
   kind: "user" | "schedule" | "proactive" | "agent" | "signals" | "milestone";
+  /** user only: the in-app help button that asked, naming the guide that answers it. */
+  guide?: GuideKey;
   cue?: CueMeta;
   /** time_milestone.* — a once-per-day client clock fact. */
   milestone?: { name: string; local_time: string };
@@ -337,6 +331,9 @@ export interface ClientContext {
 // Endpoint config
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** TTS engines YUI speaks to. */
+export type TtsProviderName = "irodori" | "openai" | "fish";
+
 /**
  * configs/endpoints.json. The three base URLs (chat/stt/tts) are separate processes.
  * Every service address is optional: `""` means "not configured" — STT/TTS/broker stay off and a
@@ -368,9 +365,13 @@ export interface EndpointsConfig {
   chat_api?: "responses" | "chat_completions" | "push";
   /** Separate ASR service (OpenAI-compatible) → /audio/transcriptions. `""` = STT off. */
   stt_base_url: string;
-  /** Separate TTS service (OpenAI-compatible) → /audio/speech. `""` = TTS off. */
+  /** /audio/transcriptions `model`. Omitted from the request when unset. */
+  stt_model?: string;
+  /** TTS server root, without `/v1` — the synth appends `/v1/audio/speech`. `""` = TTS off. */
   tts_base_url: string;
-  /** /v1/audio/speech `model`. Must match the name the TTS server is configured under. */
+  /** Which TTS engine sits at tts_base_url; it decides the request shape and the voice list. Unset = `irodori`. */
+  tts_provider?: TtsProviderName;
+  /** /v1/audio/speech `model`. Must match the name the TTS server (or provider) knows. */
   tts_model?: string;
   /** Default speaker id, used until the user picks another in the panel. */
   tts_speaker?: string;

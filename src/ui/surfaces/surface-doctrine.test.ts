@@ -2,7 +2,7 @@
  * surface-doctrine.test.ts
  *
  * Guards two doctrine rules across the small-label-chip surfaces
- * (tool-status, capture, voice indicators) and the boot-error notice:
+ * (the status pill) and the boot-error notice:
  *  - the bubble is the only surface allowed a frosted backdrop-filter;
  *    chips/pills use an opaque-enough scrim instead of blur.
  *  - status colors come from tokens (--yui-accent / --yui-danger), never
@@ -27,11 +27,7 @@ function extractBlock(css: string, selector: string): string {
 }
 
 describe("chip/pill surfaces — no blur, scrim-strong background", () => {
-  for (const file of [
-    "../chips/capture-indicator.css",
-    "../chips/voice-input-indicator.css",
-    "../notices/boot-error.css",
-  ]) {
+  for (const file of ["../chips/status-pill.css", "../notices/boot-error.css"]) {
     it(`${file} has no backdrop-filter (webkit-prefixed included)`, () => {
       expect(read(file)).not.toMatch(/backdrop-filter/);
     });
@@ -45,64 +41,89 @@ describe("chip/pill surfaces — no blur, scrim-strong background", () => {
   }
 });
 
-describe("voice-input-indicator.css — status colors from tokens", () => {
-  it("has no raw green/red oklch literals for fired/error", () => {
-    const css = read("../chips/voice-input-indicator.css");
-    expect(css).not.toMatch(/oklch\(0\.76 0\.08 145/);
-    expect(css).not.toMatch(/oklch\(0\.68 0\.13 28/);
+describe("status-pill.css — the pill's shape and colors come from tokens", () => {
+  const css = (): string => read("../chips/status-pill.css");
+
+  it("sets the pill on the shared pill tokens, 1.75rem tall at the top edge", () => {
+    const block = extractBlock(css(), ".yui-status");
+    expect(block).toMatch(/top:\s*4\.5%/);
+    expect(block).toMatch(/height:\s*1\.75rem/);
+    expect(block).toMatch(/border:\s*1px solid var\(--yui-edge\)/);
+    expect(block).toMatch(/box-shadow:\s*var\(--yui-float\)/);
+    expect(block).toMatch(/border-radius:\s*var\(--yui-radius-pill\)/);
+    expect(block).toMatch(/font-size:\s*var\(--yui-fs-sub\)/);
+    expect(block).toMatch(/font-weight:\s*500/);
   });
 
-  it('[data-state="fired"] dot uses var(--yui-accent)', () => {
-    const css = read("../chips/voice-input-indicator.css");
-    const block = extractBlock(css, '.yui-voice[data-state="fired"] .yui-voice__dot');
-    expect(block).toMatch(/var\(--yui-accent\)/);
+  it("carries no text-shadow and no raw oklch literal", () => {
+    expect(css()).not.toMatch(/text-shadow/);
+    expect(css()).not.toMatch(/oklch\(/);
   });
 
-  it('[data-state="error"] dot uses var(--yui-danger)', () => {
-    const css = read("../chips/voice-input-indicator.css");
-    const block = extractBlock(css, '.yui-voice[data-state="error"] .yui-voice__dot');
-    expect(block).toMatch(/var\(--yui-danger\)/);
+  it("colors each voice state and the tool states from tokens", () => {
+    const c = css();
+    expect(extractBlock(c, '.yui-status__dot[data-voice="fired"]')).toMatch(
+      /box-shadow:\s*0 0 0 2px var\(--yui-accent-soft\)/,
+    );
+    expect(extractBlock(c, '.yui-status__dot[data-voice="error"]')).toMatch(/var\(--yui-danger\)/);
+    expect(extractBlock(c, '.yui-status__voice[data-voice="error"]')).toMatch(
+      /color:\s*var\(--yui-danger\)/,
+    );
+    expect(extractBlock(c, '.yui-status__dot[data-tool="running"]')).toMatch(
+      /var\(--yui-text-dim\)/,
+    );
+    expect(extractBlock(c, '.yui-status__dot[data-tool="done"]')).toMatch(/var\(--yui-ok\)/);
+    expect(extractBlock(c, ".yui-status__capture-dot")).toMatch(/var\(--yui-accent\)/);
+  });
+
+  it("stops every animation under reduced motion", () => {
+    const reduced = css().slice(css().indexOf("@media (prefers-reduced-motion"));
+    expect(reduced).toContain(".yui-status__dot");
+    expect(reduced).toMatch(/animation:\s*none/);
   });
 });
 
-// The chip's fix state reuses the inline-link idiom .yui-input__error-action already
-// ships, so "this is clickable" reads identically on both error surfaces.
-describe("voice-input-indicator.css — not_configured fix affordance", () => {
-  const fix = '.yui-voice[data-state="error"][data-fix="settings"]';
+// The not_configured voice error reuses the inline-link idiom .yui-input__error-action
+// already ships, so "this is clickable" reads identically on both error surfaces.
+describe("status-pill.css — not_configured fix affordance", () => {
+  const fix = '.yui-status[data-fix="settings"]';
 
   it("underlines the label in accent-soft at rest", () => {
-    const block = extractBlock(
-      read("../chips/voice-input-indicator.css"),
-      `${fix} .yui-voice__label`,
-    );
+    const block = extractBlock(read("../chips/status-pill.css"), `${fix} .yui-status__label`);
     expect(block).toMatch(/text-decoration-color:\s*var\(--yui-accent-soft\)/);
   });
 
-  it("ignites the label on hover and on focus-visible alike", () => {
-    const css = read("../chips/voice-input-indicator.css");
-    expect(css).toContain(`${fix}:hover .yui-voice__label`);
-    expect(css).toContain(`${fix}:focus-visible .yui-voice__label`);
-  });
-
-  it("carries a 2px accent-soft focus ring", () => {
-    const block = extractBlock(read("../chips/voice-input-indicator.css"), `${fix}:focus-visible`);
-    expect(block).toMatch(/outline:\s*2px solid var\(--yui-accent-soft\)/);
+  it("ignites the label on hover and on keyboard focus alike", () => {
+    const css = read("../chips/status-pill.css");
+    expect(css).toContain(`${fix}:hover .yui-status__label`);
+    expect(css).toContain(`${fix}:has(:focus-visible) .yui-status__label`);
   });
 
   it("keeps the gear glyph out of every other state", () => {
-    const css = read("../chips/voice-input-indicator.css");
-    expect(extractBlock(css, ".yui-voice__fix-glyph")).toMatch(/display:\s*none/);
-    expect(extractBlock(css, `${fix} .yui-voice__fix-glyph`)).toMatch(/display:\s*block/);
+    const css = read("../chips/status-pill.css");
+    expect(extractBlock(css, ".yui-status__fix-glyph")).toMatch(/display:\s*none/);
+    expect(extractBlock(css, `${fix} .yui-status__fix-glyph`)).toMatch(/display:\s*block/);
   });
 });
 
-describe("surfaces.css — tool chip and input error use doctrine tokens", () => {
-  it(".yui-tool chip background is var(--yui-scrim-strong)", () => {
-    const css = read("surfaces.css");
-    const block = extractBlock(css, ".yui-tool");
-    expect(block).toMatch(/var\(--yui-scrim-strong\)/);
+// The One-Pulse Rule: the pill's dot is the only thing that animates in the character window.
+describe("character-window chips — one pulse at a time", () => {
+  it("only the status pill's dot declares an animation in status-pill.css", () => {
+    const rules = read("../chips/status-pill.css").match(
+      /^[^{}@]+\{[^}]*animation:\s*yui-[^}]*\}/gm,
+    );
+    expect(rules?.length).toBeGreaterThan(0);
+    for (const rule of rules ?? []) expect(rule).toMatch(/\.yui-status__dot/);
   });
 
+  it("the delegation chip's dot holds still", () => {
+    const css = read("../chips/delegation-chip.css");
+    expect(css).not.toMatch(/@keyframes/);
+    expect(extractBlock(css, ".yui-deleg__dot")).not.toMatch(/animation/);
+  });
+});
+
+describe("surfaces.css — input error uses doctrine tokens", () => {
   it(".yui-input__error color is var(--yui-danger)", () => {
     const css = read("surfaces.css");
     const block = extractBlock(css, ".yui-input__error");
@@ -114,29 +135,39 @@ describe("surfaces.css — tool chip and input error use doctrine tokens", () =>
 // a border on the retention note would stack a second rule right beside it.
 describe("history-section.css — a single separator above the start-fresh footer", () => {
   it(".yui-hist__foot carries no border of its own", () => {
-    const css = read("../quick-controls/sections/history-section.css");
+    const css = read("../quick-controls/history/history-section.css");
     expect(extractBlock(css, ".yui-hist__foot")).not.toMatch(/border-top/);
   });
 });
 
 // A class-level `display` outranks the UA [hidden] rule, so every such component
 // has to restate [hidden] itself or the attribute silently stops hiding it.
-describe("quick-controls.css — components with a display rule honour [hidden]", () => {
+describe("controls.css — components with a display rule honour [hidden]", () => {
   for (const selector of [".yui-link-btn", ".yui-confirm"]) {
     it(`${selector} sets display:none under [hidden]`, () => {
-      const css = read("../quick-controls/quick-controls.css");
+      const css = read("../quick-controls/controls.css");
       expect(extractBlock(css, selector)).toMatch(/display:/);
       expect(extractBlock(css, `${selector}[hidden]`)).toMatch(/display:\s*none/);
     });
   }
 });
 
+// The panel's controls live in controls.css; quick-controls.css keeps the shell, rail, body and rows.
+describe("quick-controls.css — holds no control rules", () => {
+  it("styles no switch, segment, slider or select", () => {
+    const css = read("../quick-controls/quick-controls.css");
+    for (const selector of [".yui-switch", ".yui-seg", ".yui-gain__slider", ".yui-select"]) {
+      expect(css).not.toContain(selector);
+    }
+  });
+});
+
 // Same rule on the quick-controls endpoints section: the chat-status line and the
 // session lost line both carry `display: flex`, so without their own [hidden] rule
-// reflect.ts setting `hidden` on either leaves it painted in the layout.
+// setting `hidden` on either leaves it painted in the layout.
 describe("endpoints-section.css — components with a display rule honour [hidden]", () => {
   it(".yui-chat-status and .yui-session__deleg-lost set display:none under [hidden]", () => {
-    const css = read("../quick-controls/sections/endpoints-section.css");
+    const css = read("../quick-controls/connection/endpoints-section.css");
     expect(extractBlock(css, ".yui-chat-status,\n.yui-session__deleg-lost")).toMatch(/display:/);
     expect(
       extractBlock(css, ".yui-chat-status[hidden],\n.yui-session__deleg-lost[hidden]"),
@@ -144,18 +175,20 @@ describe("endpoints-section.css — components with a display rule honour [hidde
   });
 });
 
-// Same rule on the overlay surfaces: .yui-tool carries `display: inline-flex`, so without
-// its own [hidden] rule a hidden chip keeps painting whenever `is-visible` is on it.
+// Same rule on the overlay surfaces: the status pill and its buttons carry `display: inline-flex`,
+// so without their own [hidden] rule a hidden segment keeps painting.
 describe("surfaces.css — components with a display rule honour [hidden]", () => {
-  it(".yui-tool sets display:none under [hidden]", () => {
-    const css = read("surfaces.css");
-    expect(extractBlock(css, ".yui-tool")).toMatch(/display:/);
-    expect(extractBlock(css, ".yui-tool[hidden]")).toMatch(/display:\s*none/);
+  it(".yui-status and its children set display:none under [hidden]", () => {
+    const css = read("../chips/status-pill.css");
+    expect(extractBlock(css, ".yui-status")).toMatch(/display:/);
+    expect(extractBlock(css, ".yui-status[hidden],\n.yui-status [hidden]")).toMatch(
+      /display:\s*none/,
+    );
   });
 
   it(".yui-input__pop sets display:none under [hidden]", () => {
     const css = read("surfaces.css");
-    expect(extractBlock(css, ".yui-input__pop")).toMatch(/display:/);
+    expect(extractBlock(css, ".yui-input__btn")).toMatch(/display:/);
     expect(extractBlock(css, ".yui-input__pop[hidden]")).toMatch(/display:\s*none/);
   });
 });
@@ -171,20 +204,22 @@ describe("message-window.css — the plate is a chip, not a frosted panel", () =
 
   it("adds no backdrop-filter of its own", () => {
     expect(read("../message/message-window.css")).not.toMatch(/backdrop-filter/);
+    expect(read("../message/message-plate.css")).not.toMatch(/backdrop-filter/);
   });
 
   it("styles the plate with scrim-strong", () => {
-    expect(extractBlock(read("../message/message-window.css"), ".yui-plate")).toMatch(
+    expect(extractBlock(read("../message/message-plate.css"), ".yui-plate")).toMatch(
       /var\(--yui-scrim-strong\)/,
     );
   });
 
   it("takes its live-state color from the accent token, never a literal", () => {
-    const css = read("../message/message-window.css");
+    const css = read("../message/message-plate.css");
     expect(extractBlock(css, '.yui-plate[data-state="responding"] .yui-plate__dot')).toMatch(
       /var\(--yui-accent\)/,
     );
     expect(css).not.toMatch(/oklch\(/);
+    expect(read("../message/message-window.css")).not.toMatch(/oklch\(/);
   });
 
   // In flow, a closed input whose display rule outranks [hidden] would hold the column
@@ -192,15 +227,6 @@ describe("message-window.css — the plate is a chip, not a frosted panel", () =
   it("keeps a closed input out of the flow column", () => {
     expect(
       extractBlock(read("../message/message-window.css"), ".yui-ui--message .yui-input[hidden]"),
-    ).toMatch(/display:\s*none/);
-  });
-
-  it("hides the pop button in the window that is already popped out", () => {
-    expect(
-      extractBlock(read("../message/message-window.css"), ".yui-ui--message .yui-bubble__pop"),
-    ).toMatch(/display:\s*none/);
-    expect(
-      extractBlock(read("../message/message-window.css"), ".yui-ui--message .yui-input__pop"),
     ).toMatch(/display:\s*none/);
   });
 });
@@ -232,54 +258,74 @@ describe("message-window.css — the delegation list wraps under the plate row",
   });
 });
 
-// The reasoning chip mirrors the delegation chip's layout: both chips' buttons sit in the
-// row and both panels take a full-width line after them, kept there by flex order.
-describe("reasoning-chip.css — the reasoning panel wraps under the plate row", () => {
-  it("keeps a hidden root and a hidden panel out of the flow row", () => {
-    const css = read("../chips/reasoning-chip.css");
-    expect(extractBlock(css, ".yui-think")).toMatch(/display:/);
-    expect(extractBlock(css, ".yui-think[hidden]")).toMatch(/display:\s*none/);
-    expect(extractBlock(css, ".yui-think__panel[hidden]")).toMatch(/display:\s*none/);
+// The bubble is a positioning wrapper around a box: the box wears the frost and scrolls, so the
+// edge tools can sit outside it without being clipped or faded by the scroll mask.
+describe("surfaces.css — the bubble's box carries the material", () => {
+  const css = (): string => read("surfaces.css");
+
+  it("leaves the wrapper bare: no background, no frost, no overflow", () => {
+    const block = extractBlock(css(), ".yui-bubble");
+    expect(block).not.toMatch(/background|backdrop-filter|overflow/);
   });
 
-  it("takes the row's next full-width line after both buttons", () => {
-    const block = extractBlock(read("../chips/reasoning-chip.css"), ".yui-think__panel");
-    expect(block).toMatch(/flex:\s*1 0 100%/);
-    expect(block).toMatch(/order:\s*1/);
+  it("gives the box the scrim, the frost, the scroll cap and the speech size", () => {
+    const block = extractBlock(css(), ".yui-bubble__box");
+    expect(block).toMatch(/background:\s*var\(--yui-scrim\)/);
+    expect(block).toMatch(/backdrop-filter:\s*blur\(10px\) saturate\(1\.1\)/);
+    expect(block).toMatch(/overflow-y:\s*auto/);
+    expect(block).toMatch(/font-size:\s*var\(--yui-fs-speech\)/);
   });
 
-  it("keeps the delegation list on the same line order, after the row's buttons", () => {
-    const block = extractBlock(
-      read("../message/message-window.css"),
-      ".yui-ui--message .yui-deleg__list",
+  it("fades the top of the box, not the wrapper, once it overflows", () => {
+    expect(extractBlock(css(), ".yui-bubble.is-scrollable .yui-bubble__box")).toMatch(/mask-image/);
+  });
+
+  it("drops the frost for a solid strong scrim under reduced transparency", () => {
+    const c = css();
+    const reduced = c.slice(c.indexOf("@media (prefers-reduced-transparency: reduce)"));
+    expect(reduced).toMatch(
+      /\.yui-bubble__box\s*\{\s*background:\s*var\(--yui-scrim-strong\);\s*backdrop-filter:\s*none;/,
     );
-    expect(block).toMatch(/order:\s*1/);
   });
 
-  it("clips the text at six lines and scrolls it", () => {
-    const block = extractBlock(read("../chips/reasoning-chip.css"), ".yui-think__text");
+  // markdown.ts wraps the speech in a <span>; a block last paragraph would push the caret to its own line.
+  it("runs the last speech paragraph inline so the streaming caret follows the text", () => {
+    expect(extractBlock(css(), ".yui-bubble__text > span > p:last-child")).toMatch(
+      /display:\s*inline/,
+    );
+  });
+
+  it("clips the reasoning at six lines and scrolls it", () => {
+    const block = extractBlock(css(), ".yui-bubble__think-text");
     expect(block).toMatch(/max-height:\s*calc\(6 \* 1\.45em\)/);
     expect(block).toMatch(/overflow-y:\s*auto/);
     expect(block).toMatch(/white-space:\s*pre-wrap/);
   });
 
-  it("styles the panel with the scrim and edge tokens, never literals", () => {
-    const css = read("../chips/reasoning-chip.css");
-    const block = extractBlock(css, ".yui-think__panel");
-    expect(block).toMatch(/var\(--yui-scrim\)/);
-    expect(block).toMatch(/var\(--yui-edge\)/);
-    expect(css).not.toMatch(/oklch\(/);
+  // The stream transport closes the reasoning cycle only after the speech, so both would blink.
+  it("hides the reasoning cursor while the speech caret streams", () => {
+    expect(
+      extractBlock(css(), ".yui-bubble.is-streaming .yui-bubble__think-text.is-live::after"),
+    ).toMatch(/content:\s*none/);
   });
 
-  it("breathes the glyph and blinks the cursor while live, and stops both under reduced motion", () => {
-    const css = read("../chips/reasoning-chip.css");
-    expect(extractBlock(css, ".yui-think__chip.is-live .yui-think__glyph")).toMatch(
-      /animation:.*yui-plate-breathe/,
-    );
-    expect(extractBlock(css, ".yui-think__text.is-live::after")).toMatch(/animation:/);
-    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion"));
-    expect(reduced).toContain(".yui-think__chip.is-live .yui-think__glyph");
-    expect(reduced).toContain(".yui-think__text.is-live::after");
-    expect(reduced).toMatch(/animation:\s*none/);
+  it("stops the live reasoning cursor under reduced motion", () => {
+    const c = css();
+    expect(extractBlock(c, ".yui-bubble__think-text.is-live::after")).toMatch(/animation:/);
+    const reduced = c.slice(c.indexOf("@media (prefers-reduced-motion"));
+    expect(reduced).toContain(".yui-bubble__think-text.is-live::after");
   });
+});
+
+// The scrim alpha carries contrast on the bubble, composer and plate; none adds a text shadow.
+describe("bubble, composer and plate — no text shadow", () => {
+  for (const file of [
+    "surfaces.css",
+    "../message/message-window.css",
+    "../message/message-plate.css",
+  ]) {
+    it(`${file} carries no text shadow`, () => {
+      expect(read(file)).not.toMatch(/text-shadow/);
+    });
+  }
 });
