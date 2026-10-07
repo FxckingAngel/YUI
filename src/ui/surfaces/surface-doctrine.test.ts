@@ -18,9 +18,7 @@ const read = (name: string): string => readFileSync(resolve(__dirname, name), "u
 /** Slices a top-level CSS rule's body out by selector text (anchored to line start, no nesting). */
 function extractBlock(css: string, selector: string): string {
   const normalized = selector.trim().replace(/\s+/g, " ");
-  const escaped = normalized
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/ /g, "\\s+");
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
   const re = new RegExp(`^[\\t ]*${escaped}[\\t ]*\\{`, "m");
   const match = re.exec(css);
   if (!match) throw new Error(`selector not found: ${selector}`);

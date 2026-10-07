@@ -15,9 +15,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
 const SETUP = join(ROOT, "scripts/worktree-setup.sh");
-const BASH = process.platform === "win32"
-  ? join(process.env.ProgramFiles ?? "C:/Program Files", "Git/bin/bash.exe")
-  : "bash";
+const BASH =
+  process.platform === "win32"
+    ? join(process.env.ProgramFiles ?? "C:/Program Files", "Git/bin/bash.exe")
+    : "bash";
 
 function expectLinkOrWindowsCopy(path: string): void {
   const stat = lstatSync(path);
@@ -71,7 +72,8 @@ describe("scripts/worktree-setup.sh", () => {
     writeFileSync(join(main, ".claude/settings.json"), "{}");
     const wt = tmp("yui-wt-");
     expect(spawnSync(BASH, [SETUP, wt, main]).status).toBe(0);
-    if (process.platform !== "win32") expect(lstatSync(join(wt, ".claude")).isSymbolicLink()).toBe(true);
+    if (process.platform !== "win32")
+      expect(lstatSync(join(wt, ".claude")).isSymbolicLink()).toBe(true);
     expect(readFileSync(join(wt, ".claude/settings.json"), "utf8")).toBe("{}");
 
     const tracked = tmp("yui-wt-");
