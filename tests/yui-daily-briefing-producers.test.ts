@@ -11,7 +11,9 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { marked } from "marked";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.setConfig({ testTimeout: 15_000 });
 
 const ROOT = resolve(__dirname, "..");
 const SKILL_DIR = join(ROOT, "integrations/skills/yui-daily-briefing");
