@@ -14,4 +14,4 @@ const windowsBashCandidates = [
 export const BASH =
   process.platform !== "win32"
     ? "bash"
-    : windowsBashCandidates.find((path) => existsSync(path)) ?? "bash";
+    : (windowsBashCandidates.find((path) => existsSync(path)) ?? "bash");
