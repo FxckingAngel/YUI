@@ -15,7 +15,7 @@ function readText(relativePath: string): string {
 }
 
 function frontmatter(relativePath: string): Record<string, string> {
-  const lines = readText(relativePath).split("\n");
+  const lines = readText(relativePath).split(/\r?\n/);
   expect(lines[0]).toBe("---");
   const close = lines.indexOf("---", 1);
   expect(close).toBeGreaterThan(0);

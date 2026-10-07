@@ -9,6 +9,9 @@ const GUARD = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
   "../../scripts/ci/test-guard.sh",
 );
+const BASH = process.platform === "win32"
+  ? join(process.env.ProgramFiles ?? "C:/Program Files", "Git/bin/bash.exe")
+  : "bash";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -47,7 +50,7 @@ function makeBranchedRepo(files: Record<string, string>): string {
 }
 
 function runGuard(repo: string, env: Record<string, string> = {}) {
-  const r = spawnSync("bash", [GUARD, "main"], {
+  const r = spawnSync(BASH, [GUARD, "main"], {
     cwd: repo,
     encoding: "utf8",
     env: { ...process.env, TEST_GUARD_SKIP: "", TEST_GUARD_THRESHOLD: "", ...env },

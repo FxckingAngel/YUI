@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 const ROOT = resolve(__dirname, "..");
 const SKILL_DIR = join(ROOT, "integrations/skills/yui-daily-briefing");
 const SCRIPT = join(SKILL_DIR, "scripts/briefing.py");
+const PYTHON = process.platform === "win32" ? "py" : "python3";
 const GATHER = JSON.parse(readFileSync(join(SKILL_DIR, "assets/fixtures/gather.json"), "utf8"));
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const LOCAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
@@ -27,7 +28,7 @@ function tempDir(): string {
 }
 
 function run(spool: string, args: string[], stdin = ""): Result {
-  const result = spawnSync("python3", [SCRIPT, "--spool", spool, ...args], {
+  const result = spawnSync(PYTHON, [SCRIPT, "--spool", spool, ...args], {
     input: stdin,
     encoding: "utf8",
   });
@@ -227,7 +228,7 @@ describe("briefing.py pending and mark-spoken", () => {
   it("exits 2 when neither --spool nor YUI_BRIEFING_SPOOL names the spool", () => {
     const env = { ...process.env };
     delete env.YUI_BRIEFING_SPOOL;
-    const result = spawnSync("python3", [SCRIPT, "pending"], { encoding: "utf8", env });
+    const result = spawnSync(PYTHON, [SCRIPT, "pending"], { encoding: "utf8", env });
     expect(result.status).toBe(2);
     expect(result.stderr.trim().split("\n")).toEqual([
       expect.stringContaining("set YUI_BRIEFING_SPOOL or pass --spool"),
