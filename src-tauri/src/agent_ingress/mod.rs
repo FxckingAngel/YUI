@@ -22,6 +22,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 pub(crate) mod avatar_rpc;
+mod guard;
 mod payload;
 
 // ─── Emit helper ──────────────────────────────────────────────────────────────
@@ -66,6 +67,12 @@ fn read_body(request: &mut tiny_http::Request) -> Option<String> {
 fn handle_request(app: &AppHandle, mut request: tiny_http::Request) {
     let method = request.method().to_string();
     let url = request.url().to_string();
+
+    if let Some(code) = guard::refuse(request.headers()) {
+        let _ = request.respond(tiny_http::Response::from_string("").with_status_code(code));
+        log::warn!("agent_ingress_refused code={code} method={method} url={url}");
+        return;
+    }
 
     let body = match read_body(&mut request) {
         Some(b) => b,
