@@ -15,6 +15,7 @@ from loguru import logger
 
 # ponytail: loguru's default stderr handler is enough — no core/logger setup module
 from desktop_control import activity, ops
+from desktop_control.browser_guard import BrowserRequestGuard
 
 ALLOWLIST_ENV = "DESKTOP_CONTROL_ALLOWED_APPS"
 SCREENSHOT_MAX_EDGE_ENV = "DESKTOP_CONTROL_SCREENSHOT_MAX_EDGE"
@@ -178,12 +179,15 @@ def main() -> None:
 
     preflight()
 
-    kwargs: dict[str, Any] = {"transport": args.transport}
-    if args.transport != "stdio":
-        kwargs["host"] = args.host
-        kwargs["port"] = args.port
+    if args.transport == "stdio":
+        mcp.run(transport=args.transport)
+        return
 
-    mcp.run(**kwargs)
+    import uvicorn
+
+    app = mcp.http_app(transport=args.transport)
+    app.add_middleware(BrowserRequestGuard)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

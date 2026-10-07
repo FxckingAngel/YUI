@@ -10,4 +10,4 @@ Each mod is a self-contained `uv` project in its own folder (`Mods/<mod>/`), wit
 
 ## Exposure
 
-Every mod binds `127.0.0.1` only; reach it from the remote agent over an SSH reverse tunnel. The [router](router/) collapses all mods onto one tunnel (`8080`) so you don't forward a port per mod.
+Every mod binds `127.0.0.1` only; reach it from the remote agent over an SSH reverse tunnel. The HTTP transports reject browser-originated requests before they reach a tool, while direct local processes still require the loopback and tunnel boundary. The [router](router/) collapses all mods onto one tunnel (`8080`) so you don't forward a port per mod.

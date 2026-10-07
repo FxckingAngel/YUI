@@ -17,6 +17,7 @@ from loguru import logger
 
 # ponytail: loguru's default stderr handler is enough — no core/logger setup module
 from avatar import ingress
+from avatar.browser_guard import BrowserRequestGuard
 
 SIDES = ("left", "right")
 SPOTS = ("center", "top-left", "top-right", "bottom-left", "bottom-right")
@@ -160,12 +161,15 @@ def main() -> None:
 
     logger.info(f"[setup] avatar ingress: {ingress.base_url()}")
 
-    kwargs: dict[str, Any] = {"transport": args.transport}
-    if args.transport != "stdio":
-        kwargs["host"] = args.host
-        kwargs["port"] = args.port
+    if args.transport == "stdio":
+        mcp.run(transport=args.transport)
+        return
 
-    mcp.run(**kwargs)
+    import uvicorn
+
+    app = mcp.http_app(transport=args.transport)
+    app.add_middleware(BrowserRequestGuard)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

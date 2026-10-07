@@ -16,6 +16,8 @@ from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 from loguru import logger
 
+from shell_sandbox.browser_guard import BrowserRequestGuard
+
 WORKDIR_ENV = "SHELL_SANDBOX_WORKDIR"
 TIMEOUT_ENV = "SHELL_SANDBOX_TIMEOUT"
 MAX_OUTPUT_ENV = "SHELL_SANDBOX_MAX_OUTPUT"
@@ -291,12 +293,15 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=9001, help="HTTP bind port")
     args = parser.parse_args()
 
-    kwargs: dict[str, Any] = {"transport": args.transport}
-    if args.transport != "stdio":
-        kwargs["host"] = args.host
-        kwargs["port"] = args.port
+    if args.transport == "stdio":
+        mcp.run(transport=args.transport)
+        return
 
-    mcp.run(**kwargs)
+    import uvicorn
+
+    app = mcp.http_app(transport=args.transport)
+    app.add_middleware(BrowserRequestGuard)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
