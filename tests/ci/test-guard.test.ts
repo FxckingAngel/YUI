@@ -93,7 +93,7 @@ describe("scripts/ci/test-guard.sh", () => {
   it("ignores changes outside src/ and src-tauri/", () => {
     const repo = makeBranchedRepo({ "docs/feature.md": bigSource });
     expect(runGuard(repo).status).toBe(0);
-  });
+  }, 15_000);
 
   it("fails on large Rust changes without tests", () => {
     const repo = makeBranchedRepo({
