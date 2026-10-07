@@ -25,6 +25,14 @@ UPSTREAMS = {
 _DROP = {b"connection", b"keep-alive", b"transfer-encoding", b"content-length", b"content-encoding", b"host"}
 
 
+def is_browser_request(headers) -> bool:
+    """Reject browser requests that could CSRF the unauthenticated loopback router."""
+    site = headers.get("sec-fetch-site")
+    if site is not None:
+        return site.lower() != "same-origin"
+    return headers.get("origin") is not None
+
+
 def resolve(path: str) -> tuple[str, str] | None:
     """'<mod>/<rest>' -> (upstream base, rest). Unknown mod -> None."""
     mod, _, rest = path.partition("/")
@@ -55,6 +63,9 @@ def _filter(raw) -> list[tuple[bytes, bytes]]:
 
 
 async def proxy(request):
+    if is_browser_request(request.headers):
+        logger.warning("⬅️ 403 browser request to loopback router")
+        return Response("browser requests are not accepted", status_code=403)
     path = request.path_params["path"]
     target = resolve(path)
     if target is None:
@@ -96,6 +107,9 @@ async def _aclose(up, client):
 
 async def mods_catalog(request):
     """Router meta endpoint: the registered mods, not proxied to any upstream."""
+    if is_browser_request(request.headers):
+        logger.warning("⬅️ 403 browser request to loopback router")
+        return Response("browser requests are not accepted", status_code=403)
     logger.info("🔍 _mods catalog")
     return JSONResponse(list_mods(str(request.base_url)))
 

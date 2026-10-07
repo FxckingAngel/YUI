@@ -51,6 +51,20 @@ class TestListMods:
         assert shell["upstream"] == "http://127.0.0.1:9001"
 
 
+class TestBrowserRequests:
+    def test_cross_site_fetch_metadata_is_rejected(self):
+        assert server.is_browser_request({"sec-fetch-site": "cross-site"})
+
+    def test_origin_without_fetch_metadata_is_rejected(self):
+        assert server.is_browser_request({"origin": "https://evil.example"})
+
+    def test_agent_requests_without_browser_headers_are_allowed(self):
+        assert not server.is_browser_request({})
+
+    def test_same_origin_fetch_metadata_is_allowed(self):
+        assert not server.is_browser_request({"sec-fetch-site": "same-origin"})
+
+
 def _fake_upstream():
     async def echo(request):
         body = await request.body()
@@ -74,6 +88,10 @@ class TestProxy:
         r = client.post("/echo/mcp", content="hello")
         assert r.status_code == 201
         assert r.text == "POST /mcp hello"
+
+    def test_rejects_cross_site_browser_requests_before_proxying(self, client):
+        r = client.post("/echo/mcp", headers={"Sec-Fetch-Site": "cross-site"}, content="hello")
+        assert r.status_code == 403
 
     def test_unknown_mod_returns_404(self, client):
         assert client.get("/missing/mcp").status_code == 404
