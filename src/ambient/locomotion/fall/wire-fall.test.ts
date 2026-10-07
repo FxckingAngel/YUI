@@ -113,6 +113,62 @@ describe("wireFaller — fall toggle", () => {
   });
 });
 
+describe("wireFaller — placement completion", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const deps = (ready = Promise.resolve()) => ({
+    isEnabled: () => true,
+    bus: { push: () => {} } as never,
+    renderer: {} as never,
+    travelFrame: { getWindow: () => ({}) as never, ready },
+    getFallConfig: () => ({}) as never,
+    getMotionKind: () => undefined,
+    getFloorTolerancePx: () => 24,
+    getGestureCues: () => ({}) as never,
+    setHitTestMoving: () => {},
+    onWindowLand: () => {},
+    log: noopLog,
+  });
+
+  it("resolves off Tauri without building the loop", async () => {
+    createFaller.mockClear();
+    await wireFaller(deps()).placed;
+    expect(createFaller).not.toHaveBeenCalled();
+  });
+
+  it("resolves when disposed before the travel frame is ready", async () => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    createFaller.mockClear();
+    let ready!: () => void;
+    const disposed = wireFaller(deps(new Promise<void>((resolve) => (ready = resolve))));
+    disposed.dispose();
+    ready();
+    await disposed.placed;
+    expect(createFaller).not.toHaveBeenCalled();
+  });
+
+  it("resolves once the placement has landed", async () => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    fallerDrop.mockClear();
+    let land!: () => void;
+    fallerDrop.mockImplementationOnce(() => new Promise<void>((resolve) => (land = resolve)));
+    let placed = false;
+    void wireFaller(deps()).placed.then(() => (placed = true));
+    await vi.waitFor(() => expect(fallerDrop).toHaveBeenCalledWith({ place: true }));
+    expect(placed).toBe(false);
+    land();
+    await vi.waitFor(() => expect(placed).toBe(true));
+  });
+
+  it("resolves when the placement fails", async () => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    fallerDrop.mockRejectedValueOnce(new Error("no monitor"));
+    await wireFaller(deps()).placed;
+  });
+});
+
 describe("wireFaller — landing", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

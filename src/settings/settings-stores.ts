@@ -1,3 +1,4 @@
+import { BED_SCENE_STORAGE_KEY, createBedSceneSettings } from "./avatar/bed-scene-settings";
 import { createCameraSettings, localStorageCameraStorage } from "./avatar/camera-settings";
 import {
   createExpressMotionSettings,
@@ -160,6 +161,9 @@ export function createSettingsStores(opts?: { locale?: CueLocale }) {
   const expressMotionSettings = createExpressMotionSettings({
     storage: localStorageExpressMotionStorage(),
   });
+  const bedSceneSettings = createBedSceneSettings({
+    storage: localStorageStore(BED_SCENE_STORAGE_KEY),
+  });
 
   return {
     screenshotSettings,
@@ -192,6 +196,7 @@ export function createSettingsStores(opts?: { locale?: CueLocale }) {
     guardrailsSettings,
     idleMotionSettings,
     expressMotionSettings,
+    bedSceneSettings,
   };
 }
 
@@ -238,6 +243,7 @@ export const SYNC_MODE: Record<keyof SettingsStores, SyncMode> = {
   guardrailsSettings: "broadcast",
   idleMotionSettings: "broadcast",
   expressMotionSettings: "broadcast",
+  bedSceneSettings: "broadcast",
 };
 
 /** Stores that reload on a remote signal — the `storage` event and a bridge settings-changed alike. */

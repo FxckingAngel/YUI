@@ -46,6 +46,21 @@ export interface VrmLoadResult {
   metaName: string | null;
 }
 
+/** A furniture prop standing in the character's scene. */
+export interface PropHandle {
+  /** Uniform scale. Non-finite or non-positive values are ignored. */
+  setScale(s: number): void;
+  /** Opacity clamped to [0,1]; the materials are transparent only while it is below 1. */
+  setOpacity(a: number): void;
+  /** The prop's local box around its origin, at the current scale. */
+  bounds(): {
+    min: { x: number; y: number; z: number };
+    max: { x: number; y: number; z: number };
+  };
+  /** Remove the prop from the scene and release its geometries, materials and textures. Idempotent. */
+  dispose(): void;
+}
+
 export interface Renderer {
   /** Load or hotswap VRM. If an existing model exists, prepare new model, dispose old, then replace. Returns meta name. */
   loadVRM(url: string): Promise<VrmLoadResult>;
@@ -86,6 +101,10 @@ export interface Renderer {
   stopMouth(): void;
   /** Lookup motion registry and play VRMA. Registry must be injected to operate. */
   playMotion(motion: RenderMotionSignal | null): void;
+  /** While set, only these motion ids play and their finish stays on the last frame; null releases. */
+  setMotionHold(ids: readonly string[] | null): void;
+  /** While held, the spring bones (hair, clothes) stay in their rest shape; releasing resumes physics. */
+  setSpringBonesHeld(held: boolean): void;
   /** Currently committed motion (variant-resolved) — null before any playback. */
   getCurrentMotion(): { id: string; vrma_path: string } | null;
   /**
@@ -242,6 +261,16 @@ export interface Renderer {
    * before forwarding to cursor-gaze.
    */
   setGazeCursor(pos: { x: number; y: number } | null): void;
+  /**
+   * Load a glTF as a furniture prop. It stands at the character's position and follows
+   * her position and facing every frame, and stays through a VRM hot-swap until disposed.
+   */
+  loadProp(url: string): Promise<PropHandle>;
+  /**
+   * Hips height (metres) of the loaded model's normalized rest pose — what the VRMA
+   * retargeting scales a clip's hips translation by. null with no VRM or no hips rest position.
+   */
+  getModelRestHipsHeight(): number | null;
   /** Stop rAF loop + release GPU resources. */
   dispose(): void;
 }

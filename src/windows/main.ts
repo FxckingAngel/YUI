@@ -24,6 +24,7 @@ import { createDisposers } from "../app/disposers";
 import { createWindowStores } from "../app/settings/window-stores";
 import { wireAvatarSelection } from "../app/settings/wire-avatar";
 import { createPetConfig, wireConfigReload, wireConfigWatch } from "../app/settings/wire-config";
+import { createBedSceneHold } from "../app/stage/bed-scene-hold";
 import { createStageRenderer } from "../app/stage/stage-renderer";
 import { wireInputAnchor } from "../app/stage/wire-pet-stage";
 import {
@@ -88,7 +89,13 @@ async function bootstrap(): Promise<BootstrapHandle> {
   const { settingsStores, conversationStores } = createWindowStores(register);
   const petConfig = createPetConfig({ ...settingsStores, log });
   const config = petConfig.config;
-  const { renderer, ambient } = createStageRenderer({ stage, settings: settingsStores, register });
+  const bedSceneHold = createBedSceneHold();
+  const { renderer, ambient, applyCamera } = createStageRenderer({
+    stage,
+    settings: settingsStores,
+    isCameraLocked: bedSceneHold.isHeld,
+    register,
+  });
 
   const voiceInputStatus = createVoiceInputStatus();
   register(() => voiceInputStatus.dispose());
@@ -213,6 +220,9 @@ async function bootstrap(): Promise<BootstrapHandle> {
     const configured = await createConfiguredBootstrap(cfg, {
       config,
       renderer,
+      ambient,
+      applyCamera,
+      bedSceneHold,
       surfaces,
       settings: settingsStores,
       conversation: conversationStores,
