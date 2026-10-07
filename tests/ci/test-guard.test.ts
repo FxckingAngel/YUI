@@ -3,8 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BASH } from "../command-paths";
+
+vi.setConfig({ testTimeout: 15_000 });
 
 const GUARD = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -89,7 +91,7 @@ describe("scripts/ci/test-guard.sh", () => {
   it("ignores changes outside src/ and src-tauri/", () => {
     const repo = makeBranchedRepo({ "docs/feature.md": bigSource });
     expect(runGuard(repo).status).toBe(0);
-  }, 15_000);
+  });
 
   it("fails on large Rust changes without tests", () => {
     const repo = makeBranchedRepo({
