@@ -40,6 +40,22 @@ fn emit_signals_event(app: &AppHandle, payload: SignalsPayload) {
     }
 }
 
+fn header_value<'a>(headers: &'a [tiny_http::Header], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|header| name.eq_ignore_ascii_case(header.field.as_str().as_str()))
+        .map(|header| header.value.as_str())
+}
+
+/// Browser cross-site requests must not be able to reach the unauthenticated loopback API.
+/// Agent hooks do not send Fetch Metadata or Origin headers, so they remain unaffected.
+fn is_browser_request(headers: &[tiny_http::Header]) -> bool {
+    if let Some(site) = header_value(headers, "sec-fetch-site") {
+        return !site.eq_ignore_ascii_case("same-origin");
+    }
+    header_value(headers, "origin").is_some()
+}
+
 // ─── Request handler ──────────────────────────────────────────────────────────
 
 /// Reads body up to `BODY_CEILING_BYTES`; returns `None` on read error, invalid
@@ -66,6 +82,12 @@ fn read_body(request: &mut tiny_http::Request) -> Option<String> {
 fn handle_request(app: &AppHandle, mut request: tiny_http::Request) {
     let method = request.method().to_string();
     let url = request.url().to_string();
+
+    if is_browser_request(request.headers()) {
+        let _ = request.respond(tiny_http::Response::from_string("").with_status_code(403u16));
+        log::warn!("agent_ingress_rejected_browser_request method={method} url={url}");
+        return;
+    }
 
     let body = match read_body(&mut request) {
         Some(b) => b,
@@ -216,6 +238,27 @@ pub fn start_agent_ingress(app: tauri::AppHandle, port: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn header(name: &str, value: &str) -> tiny_http::Header {
+        tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn rejects_cross_site_browser_metadata() {
+        assert!(is_browser_request(&[header(
+            "Sec-Fetch-Site",
+            "cross-site"
+        )]));
+        assert!(is_browser_request(&[header(
+            "Origin",
+            "https://evil.example"
+        )]));
+        assert!(!is_browser_request(&[]));
+        assert!(!is_browser_request(&[header(
+            "Sec-Fetch-Site",
+            "same-origin"
+        )]));
+    }
 
     // ── Bind retry ────────────────────────────────────────────────────────────
 
