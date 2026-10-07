@@ -9,9 +9,10 @@ const GUARD = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
   "../../scripts/ci/test-guard.sh",
 );
-const BASH = process.platform === "win32"
-  ? join(process.env.ProgramFiles ?? "C:/Program Files", "Git/bin/bash.exe")
-  : "bash";
+const BASH =
+  process.platform === "win32"
+    ? join(process.env.ProgramFiles ?? "C:/Program Files", "Git/bin/bash.exe")
+    : "bash";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
