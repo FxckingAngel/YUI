@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 import unicodedata
 import urllib.parse
 
@@ -119,11 +120,17 @@ def lock(spool):
     os.makedirs(spool, exist_ok=True)
     handle = open(os.path.join(spool, ".lock"), "a+b")
     if os.name == "nt":
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
         handle.seek(0)
-        handle.write(b"0")
-        handle.flush()
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        while True:
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                break
+            except OSError:
+                time.sleep(0.1)
     else:
         fcntl.flock(handle, fcntl.LOCK_EX)
     return handle
@@ -204,9 +211,9 @@ def mark_spoken(spool, paths):
 
 
 def main():
-    if hasattr(sys.stdout, "reconfigure"):
+    if os.name == "nt" and hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", newline="\n")
-        sys.stderr.reconfigure(encoding="utf-8", newline="\n")
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace", newline="\n")
     parser = argparse.ArgumentParser(description="Keep YUI daily briefings as dated markdown files.")
     parser.add_argument("--spool", default=os.environ.get("YUI_BRIEFING_SPOOL"), help="spool directory; default $YUI_BRIEFING_SPOOL")
     commands = parser.add_subparsers(dest="command", required=True)
