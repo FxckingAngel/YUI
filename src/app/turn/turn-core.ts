@@ -84,12 +84,15 @@ export async function wireTurnCore(
   phase1: TurnCorePhase1,
   deps: {
     getFrontmost: DispatcherDeps["getFrontmost"];
+    takeMessageWake?: DispatcherDeps["takeMessageWake"];
     screenCapturer: DispatcherDeps["screenCapturer"];
     openQuickControls?: DispatcherDeps["openQuickControls"];
     /** Where voice-on intent is kept across runs; a window that passes none starts every run silent. */
     voicePersistence?: VoicePersistence;
     /** A window that owns capture intent itself. */
     voiceHost?: VoiceHost;
+    /** A sustained user utterance began. */
+    onVoiceTurnStart?: () => void;
     register: (dispose: () => void) => void;
     ensureActive: () => void;
   },
@@ -134,6 +137,7 @@ export async function wireTurnCore(
     getConfig: () => config.get(),
     getSecret: (name) => config.secrets.get(name),
     submitVoice: (text) => userInput.submitVoice(text),
+    onVoiceTurnStart: deps.onVoiceTurnStart,
     register,
   });
   const { voice, voiceInput, voiceErrorDwell, turnLog, previousTurn, quotedTurn, pushTurns } =
@@ -159,6 +163,7 @@ export async function wireTurnCore(
     screenshotSettings: settings.screenshotSettings,
     screenCapturer: deps.screenCapturer,
     getFrontmost: deps.getFrontmost,
+    takeMessageWake: deps.takeMessageWake,
     voice,
     turnLog,
     previousTurn,

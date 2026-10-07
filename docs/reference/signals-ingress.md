@@ -1,6 +1,7 @@
 # Signals ingress
 
 External producers send signal groups to the loopback HTTP ingress with `POST /signals`.
+The ingress refuses a request whose `Host` is not `127.0.0.1`, `localhost` or `::1` with 421 and a request whose `Origin` names another host with 403.
 The request body contains a `signals` array and a delivery envelope:
 
 ```json
@@ -46,10 +47,11 @@ Returning to present or transitioning from busy to idle emits one catch-up conta
 both away-buffered and batched groups in their original arrival order. Returning before
 a batched group's deadline therefore includes it in that catch-up.
 
-Two client-fired turns also drain the buffers and carry the groups themselves: a
-`proactive.tap_bored` turn and the `time_milestone.first_activity` turn. Both take
-every pending group in arrival order, and a drain empties the away buffer and the
-batch buffer together.
+Three client-fired turns also drain the buffers and carry the groups themselves: a
+`proactive.tap_bored` turn, the `time_milestone.first_activity` turn, and a
+`proactive.wake` turn that carries the day's first activity. Each takes every pending
+group in arrival order, and a drain empties the away buffer and the batch buffer
+together.
 
 Each buffer retains at most five groups and drops its oldest group on overflow.
 

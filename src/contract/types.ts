@@ -88,6 +88,8 @@ export interface MotionRegistryEntry {
    * replays that curve by moving the window, so anything left in the track plays twice.
    */
   root_lock_y?: boolean;
+  /** Keeps the clip's horizontal hips translation instead of mean-centring it — for a clip whose frame is shared with a prop. */
+  root_keep_xz?: boolean;
   kind: MotionKind;
   loop: boolean;
   /** 0~100, higher is higher priority. */
@@ -242,6 +244,9 @@ export type SignalGroup = { envelope: SignalEnvelope; items: SignalItem[] };
 /** A bundled guide doc the backend answers from. */
 export type GuideKey = "controls" | "capabilities";
 
+/** What woke the character on the launch bed. */
+export type WakeCause = "click" | "timeout" | "message";
+
 /** trigger envelope describing what fired this backend turn. */
 export interface TriggerMeta {
   kind: "user" | "schedule" | "proactive" | "agent" | "signals" | "milestone";
@@ -289,6 +294,8 @@ export interface TriggerMeta {
     /** app_switched transitions held back by the global pacer, oldest first. Present only when non-empty. */
     recent?: Array<{ from_app: string; to_app: string; dwell_min: number }>;
   };
+  /** The character woke on the launch bed; `message` only on the user turn whose message woke her. */
+  wake?: { cause: WakeCause };
 }
 
 /** How the last turn that tried to speak ended. */

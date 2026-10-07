@@ -303,10 +303,14 @@ const ja: Record<string, string> = {
   "express_motion.sulk.sub": "拗ねてつんとする仕草",
   "express_motion.idle_lively.label": "元気な仕草",
   "express_motion.idle_lively.sub": "ひとしきり元気に動く仕草",
-  "express_motion.sleeping.label": "寝る",
-  "express_motion.sleeping.sub": "床で横になって眠る動き",
   "express_motion.dance.label": "ダンス",
   "express_motion.dance.sub": "短いステップから長い振り付けまでランダム",
+
+  // launch bed scene (Character tab)
+  "bed_scene.label": "ベッドで目覚める",
+  "bed_scene.sub": "起動時にベッドで眠っています",
+  "bed_scene.aria": "ベッドで目覚める",
+  "bed_scene.timeout_label": "自分で起きるまでの時間",
 
   // viewpoint (camera orbit)
   "viewpoint.section": "視点",

@@ -615,6 +615,18 @@ class YuiAdapter(BasePlatformAdapter):
         logger.info("yui: status %s not spoken chat=%s", status_key, chat_id)
         return SendResult(success=True, message_id=_message_id())
 
+    async def emit_warning(
+        self,
+        chat_id: str,
+        content: str,
+        *,
+        reply_to: str | None = None,
+        metadata: dict | None = None,
+        logical_platform: str | None = None,
+    ) -> None:
+        """A warning the gateway raises during a turn lands here, and none of it is speech."""
+        logger.info("yui: warning not spoken chat=%s", chat_id)
+
     async def send(
         self,
         chat_id: str,
