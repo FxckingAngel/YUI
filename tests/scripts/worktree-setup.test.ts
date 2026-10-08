@@ -18,6 +18,7 @@ vi.setConfig({ testTimeout: 15_000 });
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
 const SETUP = join(ROOT, "scripts/worktree-setup.sh");
+
 function expectLinkOrWindowsCopy(path: string): void {
   const stat = lstatSync(path);
   if (stat.isSymbolicLink()) return;

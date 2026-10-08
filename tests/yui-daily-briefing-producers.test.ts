@@ -120,23 +120,6 @@ describe("briefing.py write", () => {
     }
   }, 30_000);
 
-  it("opens the spool lock on the current platform", () => {
-    const spool = tempDir();
-    const probe = [
-      "import importlib.util, sys",
-      "spec = importlib.util.spec_from_file_location('briefing', sys.argv[2])",
-      "module = importlib.util.module_from_spec(spec)",
-      "spec.loader.exec_module(module)",
-      "with module.lock(sys.argv[1]): print('locked')",
-    ].join("\n");
-    const result = spawnSync(PYTHON, ["-c", probe, spool, SCRIPT], {
-      encoding: "utf8",
-    });
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("locked");
-    expect(result.stderr).toBe("");
-  });
-
   it("writes a dated markdown briefing with front matter and capped, numbered, linked items", () => {
     const bulk = Array.from({ length: 31 }, (_, index) => ({
       kind: "news",

@@ -12,6 +12,7 @@ const GUARD = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
   "../../scripts/ci/test-guard.sh",
 );
+
 const cleanups: Array<() => void> = [];
 afterEach(() => {
   while (cleanups.length) cleanups.pop()?.();
