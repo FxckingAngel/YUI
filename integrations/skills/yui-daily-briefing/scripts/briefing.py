@@ -2,12 +2,12 @@
 """Keeps daily briefings as dated markdown files and records which ones the agent has spoken."""
 import argparse
 import datetime
+import errno
 import glob
 import json
 import os
 import re
 import sys
-import time
 import unicodedata
 import urllib.parse
 
@@ -120,17 +120,15 @@ def lock(spool):
     os.makedirs(spool, exist_ok=True)
     handle = open(os.path.join(spool, ".lock"), "a+b")
     if os.name == "nt":
-        handle.seek(0, os.SEEK_END)
-        if handle.tell() == 0:
-            handle.write(b"0")
-            handle.flush()
         handle.seek(0)
         while True:
             try:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
                 break
-            except OSError:
-                time.sleep(0.1)
+            except OSError as error:
+                # LK_LOCK gives up after ten one-second tries with EDEADLK.
+                if error.errno != errno.EDEADLK:
+                    raise
     else:
         fcntl.flock(handle, fcntl.LOCK_EX)
     return handle
