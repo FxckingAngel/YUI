@@ -1,0 +1,11 @@
+changelog:
+  categories:
+    - title: Deprecations
+      labels:
+        - deprecation
+    - title: Removed
+      labels:
+        - removal
+    - title: What's Changed
+      labels:
+        - "*"
