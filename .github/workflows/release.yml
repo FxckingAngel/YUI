@@ -65,7 +65,7 @@ jobs:
               '| macOS (Apple Silicon) | `.dmg` | Supported |',
               '| Windows (x64) | `.msi`, `-setup.exe` | Supported |',
               '',
-'The Windows bundles are built by CI and have been tested live on Windows.',
+              'The Windows bundles are built by CI and have been tested live on Windows.',
               '',
               'If macOS refuses to open the app, allow it once under System Settings → Privacy & Security → **Open Anyway**.',
             ].join('\n')
