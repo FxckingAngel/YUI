@@ -18,7 +18,7 @@ vi.setConfig({ testTimeout: 15_000 });
 const ROOT = resolve(__dirname, "..");
 const SKILL_DIR = join(ROOT, "integrations/skills/yui-daily-briefing");
 const SCRIPT = join(SKILL_DIR, "scripts/briefing.py");
-const PYTHON = process.platform === "win32" ? "py" : "python3";
+const PYTHON = process.env.YUI_PYTHON ?? "py";
 const GATHER = JSON.parse(readFileSync(join(SKILL_DIR, "assets/fixtures/gather.json"), "utf8"));
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const LOCAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
