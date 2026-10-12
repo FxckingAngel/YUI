@@ -21,6 +21,7 @@ function fakeCameraSettings(initial: { zoom: number; azimuth: number; polar: num
     get: () => state,
     setZoom: vi.fn((zoom: number) => {
       state = { ...state, zoom };
+      for (const cb of subs) cb(state);
     }),
     subscribe: vi.fn((cb: (s: typeof state) => void) => {
       subs.add(cb);
@@ -56,7 +57,7 @@ function wheelOn(stage: HTMLElement, opts: { deltaY: number; ctrlKey?: boolean }
 }
 
 describe("wireCamera", () => {
-  function setup(isLocked?: () => boolean) {
+  function setup() {
     const stage = document.createElement("div");
     const renderer = { setZoom: vi.fn(), setOrbit: vi.fn(), setIdleThrottleEnabled: vi.fn() };
     const cameraSettings = fakeCameraSettings({ zoom: 1.2, azimuth: 0.3, polar: 1.1 });
@@ -66,7 +67,6 @@ describe("wireCamera", () => {
       renderer,
       cameraSettings,
       idleThrottleSettings,
-      isLocked,
     });
     return {
       stage,
@@ -74,7 +74,6 @@ describe("wireCamera", () => {
       cameraSettings,
       idleThrottleSettings,
       removeWheel: camera.dispose,
-      apply: camera.apply,
     };
   }
 
@@ -112,26 +111,6 @@ describe("wireCamera", () => {
         sensitivity: CAMERA_WHEEL_SENSITIVITY,
       }),
     );
-  });
-
-  it("ignores the wheel zoom while locked", () => {
-    const { stage, cameraSettings } = setup(() => true);
-
-    wheelOn(stage, { deltaY: -240 });
-
-    expect(cameraSettings.setZoom).not.toHaveBeenCalled();
-  });
-
-  it("holds a store change back while locked and applies it on apply()", () => {
-    const { renderer, cameraSettings, apply } = setup(() => true);
-
-    cameraSettings.change({ zoom: 2, azimuth: 0.5, polar: 1.3 });
-    expect(renderer.setZoom).toHaveBeenCalledExactlyOnceWith(1.2);
-    expect(renderer.setOrbit).toHaveBeenCalledExactlyOnceWith({ azimuth: 0.3, polar: 1.1 });
-
-    apply();
-    expect(renderer.setZoom).toHaveBeenLastCalledWith(2);
-    expect(renderer.setOrbit).toHaveBeenLastCalledWith({ azimuth: 0.5, polar: 1.3 });
   });
 
   it("removes only the wheel listener; the store subscribers die with the stores", () => {

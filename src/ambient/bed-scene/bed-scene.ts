@@ -9,9 +9,13 @@
  */
 
 import type { WakeCause } from "../../contract";
-import type { createStationaryFrame } from "../../io/window/geometry/stationary-frame";
+import type {
+  createStationaryFrame,
+  FrameExtents,
+} from "../../io/window/geometry/stationary-frame";
 import type { Logger } from "../../logger";
 import type { PropHandle, Renderer } from "../../renderer";
+import type { createCameraSettings } from "../../settings/avatar/camera-settings";
 import type { Tier1Engine } from "../liveliness/tier1";
 
 /** Registry id of the one-shot that lays her down on the bed. */
@@ -61,10 +65,13 @@ export interface BedSceneDeps {
     | "setOrbit"
   >;
   liveliness: Pick<Tier1Engine, "setAsleep">;
-  /** The stored orbit: the scene views her head-on and puts this back at its end. */
-  camera: { get(): { azimuth: number; polar: number } };
+  /** Camera changes keep the scene head-on; the stored orbit returns at the end. */
+  camera: Pick<ReturnType<typeof createCameraSettings>, "get" | "subscribe">;
   /** null runs the scene in the window as it is. */
-  frame: Pick<ReturnType<typeof createStationaryFrame>, "park" | "refit" | "release"> | null;
+  frame: Pick<
+    ReturnType<typeof createStationaryFrame>,
+    "park" | "repark" | "refit" | "release"
+  > | null;
   /** Settles once the boot placement has put the window where it stays. */
   placed: Promise<void>;
   /** How long she sleeps before the timeout wakes her, on either entry; read while she sleeps. */
@@ -103,6 +110,10 @@ export function createBedScene(deps: BedSceneDeps): BedScene {
   let generation = 0;
   let unsub: (() => void) | null = null;
   let prop: PropHandle | null = null;
+  let unsubCamera: (() => void) | null = null;
+  let cameraChanged = false;
+  let frameParked = false;
+  let reparking = false;
   let cause: BedWakeCause | null = null;
   /** The clips the running entry holds. */
   let ids = LAUNCH_MOTION_IDS;
@@ -133,6 +144,9 @@ export function createBedScene(deps: BedSceneDeps): BedScene {
     asleepS = 0;
     fadeS = null;
     opacity = 0;
+    cameraChanged = false;
+    frameParked = false;
+    reparking = false;
   }
 
   function setLying(next: boolean): void {
@@ -147,6 +161,10 @@ export function createBedScene(deps: BedSceneDeps): BedScene {
     ids = next === "launch" ? LAUNCH_MOTION_IDS : COMMAND_MOTION_IDS;
     state = "starting";
     unsub = renderer.onTick(onTick);
+    unsubCamera = deps.camera.subscribe(() => {
+      faceHeadOn();
+      cameraChanged = true;
+    });
   }
 
   async function finish(reason: EndReason): Promise<void> {
@@ -159,6 +177,8 @@ export function createBedScene(deps: BedSceneDeps): BedScene {
     settleLie = null;
     unsub?.();
     unsub = null;
+    unsubCamera?.();
+    unsubCamera = null;
     try {
       liveliness.setAsleep(false);
       renderer.setSpringBonesHeld(false);
@@ -216,16 +236,12 @@ export function createBedScene(deps: BedSceneDeps): BedScene {
 
     await deps.placed;
     if (generation !== startedAt) return;
-    const pxPerMetre = renderer.getPxPerMetre();
-    const anchor = renderer.getCharacterAnchor();
-    if (frame && pxPerMetre !== null && anchor) {
-      const { min, max } = loaded.bounds();
+    cameraChanged = false;
+    const extents = bedExtents();
+    if (frame && extents) {
       try {
-        await frame.park({
-          leftPx: (-min.x + FRAME_MARGIN_M) * pxPerMetre,
-          rightPx: (max.x + FRAME_MARGIN_M) * pxPerMetre,
-          anchorX: anchor.x,
-        });
+        await frame.park(extents);
+        frameParked = true;
       } catch (err) {
         log.warn("frame_park_failed", { degrade: true, error: String(err) });
       }
@@ -234,6 +250,32 @@ export function createBedScene(deps: BedSceneDeps): BedScene {
     if (fadeS !== null) return;
     opacity = 1;
     loaded.setOpacity(1);
+  }
+
+  function bedExtents(): FrameExtents | null {
+    const pxPerMetre = renderer.getPxPerMetre();
+    const anchor = renderer.getCharacterAnchor();
+    if (!prop || pxPerMetre === null || !anchor) return null;
+    const { min, max } = prop.bounds();
+    return {
+      leftPx: (-min.x + FRAME_MARGIN_M) * pxPerMetre,
+      rightPx: (max.x + FRAME_MARGIN_M) * pxPerMetre,
+      anchorX: anchor.x,
+    };
+  }
+
+  function repark(): void {
+    if (!cameraChanged || !frameParked || reparking || !frame) return;
+    const extents = bedExtents();
+    if (!extents) return;
+    cameraChanged = false;
+    reparking = true;
+    void frame
+      .repark(extents)
+      .catch((err) => log.warn("frame_repark_failed", { degrade: true, error: String(err) }))
+      .finally(() => {
+        reparking = false;
+      });
   }
 
   /** Asleep on the sleep loop: the eyes close, the hair and the gaze rest. */
@@ -330,6 +372,7 @@ export function createBedScene(deps: BedSceneDeps): BedScene {
       void finish("lost");
       return;
     }
+    repark();
     if (state === "asleep") {
       if (lyingDown) {
         if (clipEnded(BED_LIE_MOTION_ID)) {

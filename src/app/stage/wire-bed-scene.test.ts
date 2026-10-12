@@ -48,7 +48,6 @@ function setup(over: { enabled?: boolean; ready?: Promise<void>; frameWindow?: (
       cameraSettings: { get: () => ({ zoom: 1, azimuth: 0.7, polar: 1.4 }) },
     } as never,
     bus: { push: (env: { event_name: string }) => pushed.push(env.event_name) } as never,
-    applyCamera: () => calls.push("applyCamera"),
     hold: createBedSceneHold(),
     register: (teardown) => teardowns.push(teardown),
     log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -114,7 +113,7 @@ describe("wireBedScene", () => {
     expect(reduced.bedScene.bed.phase()).toBe("unsupported");
   });
 
-  it("holds from construction until the scene is done, then re-applies the camera and drops once", () => {
+  it("holds from construction until the scene is done, then drops once", () => {
     const h = setup();
     expect(h.bedScene.isHeld()).toBe(true);
     const deps = h.start();
@@ -130,7 +129,7 @@ describe("wireBedScene", () => {
 
     deps.onDone();
     expect(h.bedScene.isHeld()).toBe(false);
-    expect(h.calls).toEqual(["applyCamera", "drop:held=false"]);
+    expect(h.calls).toEqual(["drop:held=false"]);
   });
 
   it("releases a hold that was never started when the bootstrap tears down", () => {
@@ -219,7 +218,7 @@ describe("wireBedScene", () => {
 
       (mocks.sceneDeps.at(-1) as BedSceneDeps).onDone();
       expect(h.bedScene.isHeld()).toBe(false);
-      expect(h.calls.slice(-2)).toEqual(["applyCamera", "drop:held=false"]);
+      expect(h.calls.slice(-1)).toEqual(["drop:held=false"]);
     });
 
     it("answers interrupted when a click or a message comes while she is still being put on the floor", async () => {

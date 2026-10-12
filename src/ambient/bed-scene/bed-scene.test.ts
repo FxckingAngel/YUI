@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PropHandle, TickContext, TickFn } from "../../renderer";
+import { createCameraSettings } from "../../settings/avatar/camera-settings";
 import {
   BED_LIE_MOTION_ID,
   BED_PROP_URL,
@@ -52,6 +53,10 @@ function makeHarness(
   const cached = new Set<string>();
   const propUrls: string[] = [];
   const parked: unknown[] = [];
+  const repark = vi.fn(async (_e: { leftPx: number; rightPx: number; anchorX: number }) => {});
+  const camera = createCameraSettings();
+  camera.setAzimuth(STORED_ORBIT.azimuth);
+  camera.setPolar(STORED_ORBIT.polar);
   const prop: PropHandle = {
     setScale: (s) => calls.push(`prop.scale:${s}`),
     setOpacity: (a) => calls.push(`prop.opacity:${a}`),
@@ -101,7 +106,7 @@ function makeHarness(
         return Promise.resolve(prop);
       },
       getModelRestHipsHeight: () => REST_HIPS_M,
-      getPxPerMetre: () => PX_PER_METRE,
+      getPxPerMetre: () => PX_PER_METRE * camera.get().zoom,
       getCharacterAnchor: () => ANCHOR,
       // Logged as the gaze the suppression leaves: off while suppressed.
       setGazeSuppressed: (suppressed) => calls.push(`gaze:${!suppressed}`),
@@ -109,8 +114,9 @@ function makeHarness(
       setSpringBonesHeld: (held) => calls.push(`spring:${held}`),
     },
     liveliness: { setAsleep: (asleep) => calls.push(`asleep:${asleep}`) },
-    camera: { get: () => STORED_ORBIT },
+    camera,
     frame: {
+      repark,
       park: async (e) => {
         parked.push(e);
         calls.push("frame.park");
@@ -151,6 +157,8 @@ function makeHarness(
     prop,
     propUrls,
     parked,
+    repark,
+    camera,
     flush,
     frame,
     runFrames: async (n: number, dt?: number): Promise<void> => {
@@ -193,6 +201,127 @@ function makeHarness(
 }
 
 describe("createBedScene", () => {
+  it.each([
+    "lie",
+    "sleep",
+    "wake",
+  ])("coalesces zoom bursts and recomputes bed extents during %s", async (phase) => {
+    const h = makeHarness();
+    await h.lieDown();
+    if (phase !== "lie") await h.frame(MOTION_S.bed_lie);
+    if (phase === "wake") h.scene.wake("agent");
+    const state = h.scene.state();
+    const calls = [...h.calls];
+
+    h.camera.setZoom(1.5);
+    h.camera.setZoom(2);
+    expect(h.repark).not.toHaveBeenCalled();
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledExactlyOnceWith({
+      leftPx: (-BOUNDS.min.x + FRAME_MARGIN_M) * PX_PER_METRE * 2,
+      rightPx: (BOUNDS.max.x + FRAME_MARGIN_M) * PX_PER_METRE * 2,
+      anchorX: ANCHOR.x,
+    });
+    expect(h.scene.state()).toBe(state);
+    expect(h.calls.filter((call) => !call.startsWith("orbit:"))).toEqual(
+      calls.filter((call) => !call.startsWith("orbit:")),
+    );
+    expect(h.woke).toEqual([]);
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a starting camera change in the first park without reparking", async () => {
+    const h = makeHarness({ prop: "pending" });
+    const lying = h.scene.lieDown();
+    h.place();
+    await h.flush();
+    expect(h.scene.state()).toBe("starting");
+    h.camera.setZoom(2);
+    h.resolveProp();
+    await lying;
+
+    expect(h.parked).toEqual([
+      {
+        leftPx: (-BOUNDS.min.x + FRAME_MARGIN_M) * (PX_PER_METRE * 2),
+        rightPx: (BOUNDS.max.x + FRAME_MARGIN_M) * (PX_PER_METRE * 2),
+        anchorX: ANCHOR.x,
+      },
+    ]);
+    await h.frame();
+    expect(h.repark).not.toHaveBeenCalled();
+  });
+
+  it("keeps a zoom pending until the initial park lands", async () => {
+    const h = makeHarness({ park: "pending" });
+    await h.startAsleep();
+    expect(h.parked).toHaveLength(1);
+    h.camera.setZoom(2);
+    await h.frame();
+    await h.frame();
+    expect(h.repark).not.toHaveBeenCalled();
+
+    h.resolvePark();
+    await h.flush();
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledExactlyOnceWith({
+      leftPx: (-BOUNDS.min.x + FRAME_MARGIN_M) * PX_PER_METRE * 2,
+      rightPx: (BOUNDS.max.x + FRAME_MARGIN_M) * PX_PER_METRE * 2,
+      anchorX: ANCHOR.x,
+    });
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a second zoom pending until the first repark lands", async () => {
+    const h = makeHarness();
+    await h.startAsleep();
+    let land!: () => void;
+    h.repark.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    h.camera.setZoom(2);
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledTimes(1);
+
+    h.camera.setZoom(3);
+    await h.frame();
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledTimes(1);
+    land();
+    await h.flush();
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledTimes(2);
+    expect(h.repark).toHaveBeenLastCalledWith({
+      leftPx: (-BOUNDS.min.x + FRAME_MARGIN_M) * (PX_PER_METRE * 3),
+      rightPx: (BOUNDS.max.x + FRAME_MARGIN_M) * (PX_PER_METRE * 3),
+      anchorX: ANCHOR.x,
+    });
+    expect(h.scene.state()).toBe("asleep");
+  });
+
+  it("unsubscribes zoom changes and discards a pending zoom when the scene ends", async () => {
+    const h = makeHarness();
+    await h.startAsleep();
+    h.camera.setZoom(2);
+    h.scene.cancel();
+    await h.flush();
+    h.camera.setZoom(3);
+    await h.frame();
+    expect(h.repark).not.toHaveBeenCalled();
+    expect(h.scene.state()).toBe("done");
+
+    await h.startAsleep();
+    await h.frame();
+    expect(h.repark).not.toHaveBeenCalled();
+    h.camera.setZoom(1);
+    await h.frame();
+    expect(h.repark).toHaveBeenCalledOnce();
+  });
+
   it("lies asleep under the hold, then shows the scaled bed in a frame parked after placement", async () => {
     const h = makeHarness();
     h.scene.start();
