@@ -57,6 +57,10 @@ const textChunk = (content: string): any => ({
   choices: [{ index: 0, delta: { content }, finish_reason: null }],
 });
 
+const reasoningChunk = (field: "reasoning_content" | "reasoning", text: string): any => ({
+  choices: [{ index: 0, delta: { [field]: text }, finish_reason: null }],
+});
+
 const finishChunk = (reason: string): any => ({
   choices: [{ index: 0, delta: {}, finish_reason: reason }],
 });
@@ -159,6 +163,79 @@ describe("streamChat — Chat Completions text streaming", () => {
     const ac = new AbortController();
     await collect(streamChat(CONFIG, req({ signal: ac.signal })));
     expect(ccCreateMock.mock.calls[0][1]?.signal).toBe(ac.signal);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// reasoning deltas
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("streamChat — Chat Completions reasoning deltas", () => {
+  it("yields reasoning events before speech_delta and keeps reasoning out of speech_text", async () => {
+    ccCreateMock.mockResolvedValueOnce(
+      streamOf([
+        reasoningChunk("reasoning_content", "thinking..."),
+        reasoningChunk("reasoning", "hmm"),
+        textChunk("Hello"),
+        finishChunk("stop"),
+      ]),
+    );
+
+    const events = await collect(streamChat(CONFIG, req()));
+
+    expect(events).toEqual([
+      { type: "reasoning", delta: "thinking..." },
+      { type: "reasoning", delta: "hmm" },
+      { type: "speech_delta", text: "Hello" },
+      { type: "speech_done", text: "Hello" },
+      { type: "completed", envelope: { speech_text: "Hello" }, responseId: "" },
+    ]);
+  });
+
+  it("counts a reasoning-only cue response as silent — round-trips, no reasoning in the follow-up", async () => {
+    const express = oneWayStub("generate_express");
+    const registry = createClientToolRegistry([express]);
+    ccCreateMock
+      .mockResolvedValueOnce(
+        streamOf([
+          reasoningChunk("reasoning_content", "secret thoughts"),
+          toolCallStart(0, "call_1", "generate_express", GEN_EXPRESS_ARGS),
+          finishChunk("tool_calls"),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        streamOf([reasoningChunk("reasoning", "Now"), textChunk("warm"), finishChunk("stop")]),
+      );
+
+    const events = await collect(streamChat(CONFIG, req(), { tools: registry }));
+
+    // the reasoning-only first response still counts as silent, so the result went out
+    expect(ccCreateMock).toHaveBeenCalledTimes(2);
+    for (const m of ccCreateMock.mock.calls[1][0].messages) {
+      expect(JSON.stringify(m)).not.toContain("secret thoughts");
+    }
+    expect(events).toEqual([
+      { type: "reasoning", delta: "secret thoughts" },
+      {
+        type: "express",
+        args: { emotion_id: "happy", motion_id: "embarrassed", emotion_text: "[whisper]" },
+      },
+      { type: "keepalive" },
+      { type: "reasoning", delta: "\n\n" },
+      { type: "reasoning", delta: "Now" },
+      { type: "speech_delta", text: "warm" },
+      { type: "speech_done", text: "warm" },
+      {
+        type: "completed",
+        envelope: {
+          speech_text: "warm",
+          emotion: { id: "happy" },
+          motion: { id: "embarrassed" },
+          emotion_text: "[whisper]",
+        },
+        responseId: "",
+      },
+    ]);
   });
 });
 

@@ -155,18 +155,38 @@ describe("createChunkReducer — text", () => {
     );
   });
 
-  it("reasoning_content/reasoning/thinking fields never yield text items", () => {
+  it("emits a reasoning item before the text item for a delta.reasoning_content chunk", () => {
     const reducer = createChunkReducer();
     expect(
       reducer.feed({
-        choices: [{ delta: { reasoning_content: "thinking..." }, finish_reason: null }],
+        choices: [
+          { delta: { reasoning_content: "thinking...", content: "Hi" }, finish_reason: null },
+        ],
       }),
-    ).toEqual([]);
+    ).toEqual([
+      { kind: "reasoning", text: "thinking..." },
+      { kind: "text", text: "Hi" },
+    ]);
+  });
+
+  it("reads delta.reasoning when reasoning_content is absent", () => {
+    const reducer = createChunkReducer();
     expect(
       reducer.feed({ choices: [{ delta: { reasoning: "hmm" }, finish_reason: null }] }),
-    ).toEqual([]);
+    ).toEqual([{ kind: "reasoning", text: "hmm" }]);
+  });
+
+  it("empty-string reasoning fields and a thinking field yield nothing", () => {
+    const reducer = createChunkReducer();
     expect(
-      reducer.feed({ choices: [{ delta: { thinking: "pondering" }, finish_reason: null }] }),
+      reducer.feed({
+        choices: [
+          {
+            delta: { reasoning_content: "", reasoning: "", thinking: "pondering" },
+            finish_reason: null,
+          },
+        ],
+      }),
     ).toEqual([]);
   });
 });
