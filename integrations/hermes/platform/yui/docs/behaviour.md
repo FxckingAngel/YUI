@@ -2,6 +2,11 @@
 
 - Serves `ws://<host>:<port>/ws`. The client sends `hello` with its key, its `chat_id` and the
   vocabulary it can render; the plugin answers `ready` and keeps the socket open.
+- States `max_turn_bytes` of 4 MiB in `ready`, so the client may put the turn's screenshot and the
+  user's attached images on the `turn` frame. It accepts a `turn` frame up to that size and every
+  other frame up to 256 KiB, stores each turn image as a cached file and hands its path to the
+  gateway with the turn; an image it cannot decode or store is left out and the turn is still
+  handled.
 - Turns the `turn` frame into a gateway message: the rendered `client_context` block, a blank
   line, then the user's utterance.
 - Registers `generate_express`, whose enums are the emotion ids, motion ids and voice-tone tags
@@ -54,7 +59,9 @@
   name when the turn ends. A turn the gateway runs inside a turn it interrupted ends first, and the
   interrupted turn ends behind it. A turn whose text the gateway takes into a turn already running
   on the same chat ends when that turn ends, and every frame the plugin sends after that turn
-  arrives names its id. A turn the gateway started on its own, such as a cron result, carries an
+  arrives names its id. Only a text-only turn is taken into a running turn: a turn that carries
+  images waits for the running turn or interrupts it, by the gateway's busy-input setting. A turn
+  the gateway started on its own, such as a cron result, carries an
   id the plugin mints, of the form `hermes-<n>`, counted per gateway process.
 - Sends a `delegations` frame whenever background work starts or finishes, so the client can show
   what is running; each finished item carries its `status` and `summary`. The plugin holds fifty

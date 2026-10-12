@@ -4,13 +4,13 @@
  * anyway, so we send the small-but-legible payload instead of full-res base64.
  */
 
+import { encodeJpeg } from "../../io/image/jpeg-encode";
 import { createLogger } from "../../logger";
 
 const log = createLogger("image-resize");
 
-// Tunable knobs: long edge cap (px) and JPEG quality.
+// Tunable knob: long edge cap (px).
 export const MAX_LONG_EDGE = 1280;
-const JPEG_QUALITY = 0.72;
 
 interface Dims {
   width: number;
@@ -25,31 +25,15 @@ export function fitLongEdge(width: number, height: number, maxLongEdge = MAX_LON
   return { width: Math.round(width * scale), height: Math.round(height * scale) };
 }
 
-// Decode → downscale → JPEG data URL. Falls back to the original data URL on
-// any decode/encode failure so the attachment is never dropped silently.
+// Decode → downscale → JPEG data URL. Rejects when any step fails — a broken
+// image has nothing to send — and when the canvas yields no JPEG data.
 export async function downscaleToJpeg(file: File): Promise<string> {
   try {
     const bitmap = await createImageBitmap(file);
     const { width, height } = fitLongEdge(bitmap.width, bitmap.height);
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("no 2d context");
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
-    return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+    return encodeJpeg(bitmap, width, height);
   } catch (err) {
     log.warn("downscale_failed", { name: file.name, error: String(err) });
-    return readAsDataUrl(file);
+    throw err;
   }
-}
-
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }

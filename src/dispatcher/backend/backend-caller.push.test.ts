@@ -11,8 +11,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type { EndpointsConfig } from "../../contract";
+import type { EndpointsConfig, InputContext } from "../../contract";
 import type { ChatHistoryEntry } from "../../io/chat/conversation/chat-history-store";
+import { fitTurnImages } from "../../io/chat/push/fit-turn-images";
 import type { PushTurnFrame } from "../../io/chat/push/push-frames";
 import type { Logger } from "../../logger";
 import type { BusEnvelope } from "../core/event-bus";
@@ -22,6 +23,10 @@ import { createRenderTurn } from "../turn/render-turn";
 import { createTurnFeed } from "../turn/turn-feed";
 import { createBackendCaller, type TurnOutcome } from "./backend-caller";
 import { PRE_SPEECH_TIMEOUT_MS } from "./idle-watchdog";
+
+vi.mock("../../io/chat/push/fit-turn-images", () => ({ fitTurnImages: vi.fn() }));
+
+const fitImages = vi.mocked(fitTurnImages);
 
 function scheduleEnv(): BusEnvelope {
   return {
@@ -76,7 +81,12 @@ function fakeSocketState() {
   };
 }
 
-function callerWith(accepted: boolean, config: EndpointsConfig = PUSH_CONFIG) {
+function callerWith(
+  accepted: boolean,
+  config: EndpointsConfig = PUSH_CONFIG,
+  getScreenshot?: () => Promise<InputContext["screenshot"] | undefined>,
+  pushImageRoom?: (frame: PushTurnFrame) => number | undefined,
+) {
   sent = [];
   records = [];
   contexts = [];
@@ -111,6 +121,8 @@ function callerWith(accepted: boolean, config: EndpointsConfig = PUSH_CONFIG) {
       throw new Error("push mode must not open a chat stream");
     },
     turnOutput,
+    ...(getScreenshot ? { getScreenshot } : {}),
+    ...(pushImageRoom ? { pushImageRoom } : {}),
     getPrevious: () => {
       order.push("context");
       onContextBuilt?.();
@@ -158,6 +170,7 @@ beforeEach(() => {
   turnOutput = makeTurnOutput();
   logger = makeLogger();
   autoRender = true;
+  fitImages.mockReset();
 });
 
 describe("backend_caller — push transport", () => {
@@ -214,6 +227,62 @@ describe("backend_caller — push transport", () => {
     expect(outcome).toBe("superseded_by_user");
     expect(sent).toEqual([]);
     expect(sentIds).toEqual([]);
+  });
+
+  it("carries the screenshot and the attachments on the frame's images, in that order", async () => {
+    const caller = callerWith(true, PUSH_CONFIG, async () => ({
+      enabled: true,
+      source: { kind: "monitor", index: 0 },
+      data_url: "data:image/png;base64,AAA",
+    }));
+
+    await caller.call(
+      turnOf(
+        {
+          ...userEnv("look"),
+          payload: { text: "look", images: ["data:image/jpeg;base64,BBB"] },
+        },
+        7,
+      ),
+    );
+
+    expect(sent[0]!.images).toEqual(["data:image/png;base64,AAA", "data:image/jpeg;base64,BBB"]);
+  });
+
+  it("sends no images field on a turn with no image", async () => {
+    await callerWith(true).call(turnOf(userEnv("look"), 7));
+
+    expect(sent[0]!.images).toBeUndefined();
+  });
+
+  it("hands pushTurn the shrunk images when a stated size cannot hold them", async () => {
+    fitImages.mockResolvedValue(["data:image/jpeg;base64,shrunk"]);
+    const caller = callerWith(
+      true,
+      PUSH_CONFIG,
+      async () => ({
+        enabled: true,
+        source: { kind: "monitor", index: 0 },
+        data_url: "data:image/png;base64,AAA",
+      }),
+      () => 4096,
+    );
+
+    await caller.call(
+      turnOf(
+        {
+          ...userEnv("look"),
+          payload: { text: "look", images: ["data:image/png;base64,BBB"] },
+        },
+        7,
+      ),
+    );
+
+    expect(fitImages).toHaveBeenCalledWith(
+      ["data:image/png;base64,AAA", "data:image/png;base64,BBB"],
+      expect.any(Number),
+    );
+    expect(sent[0]!.images).toEqual(["data:image/jpeg;base64,shrunk"]);
   });
 
   it("reports the turn id the socket accepted", async () => {
