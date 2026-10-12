@@ -4,13 +4,15 @@ import type { AppConfig } from "../config/load";
 import { isChatConfigured } from "../dispatcher/backend/backend-caller";
 import type { Guardrails } from "../dispatcher/core/guardrails";
 import type { Dispatcher } from "../dispatcher/dispatcher";
+import { createAvatarTools } from "../io/chat/tools/avatar";
+import type { ClientTool } from "../io/chat/tools/client-tools";
 import type { ScreenCapturer } from "../io/window/capture/screen-source-provider";
 import { createFrontmostTracker } from "../io/window/frontmost-tracker";
 import type { SummonHotkey } from "../io/window/pet/summon-hotkey";
 import { subscribeOsEvent } from "../io/window/tauri-listen";
 import { createLogger } from "../logger";
 import { mergeScreen } from "../settings/capture/screen-settings";
-import { isMacOS } from "../tauri-env";
+import { isMacOS, isTauri } from "../tauri-env";
 import { t } from "../ui/i18n";
 import { maybeShowFirstRunHint } from "../ui/notices/first-run-hint";
 import { wireIngressDeadNotice } from "../ui/notices/ingress-dead-notice";
@@ -48,6 +50,8 @@ export interface ConfiguredBootstrapHandles {
   vocabulary: Awaited<ReturnType<typeof wireVocabulary>>;
   /** The seat transitions — the dev perch plays its sit-down through it. */
   sitter: Pick<Sitter, "sitDown">;
+  /** The tools over the avatar executor, empty in a build that creates none. */
+  avatarTools: readonly ClientTool[];
   /** Cancels the in-flight turn, cuts the outstanding push turns and stops the queued speech. */
   stopTurn: () => void;
   /** Resets the proactive gap, the way a typed submit does. */
@@ -114,10 +118,17 @@ const realFactories: ConfiguredBootstrapFactories = {
     const unlistenFrontmost = await subscribeOsEvent({ onTick: frontmostTracker.onTick, log });
     if (unlistenFrontmost) register(unlistenFrontmost);
 
+    // The stage is wired after the turn core, so the tools read the executor late-bound:
+    // null until wireLocomotion has run.
+    let locomotion: ReturnType<typeof wireLocomotion> | null = null;
+    const avatarTools = isTauri()
+      ? createAvatarTools(() => locomotion?.getAvatarExecutor() ?? null)
+      : [];
     const core = await wireTurnCore(cfg, phase1, {
       getFrontmost: () => frontmostTracker.get(),
       screenCapturer: phase1.screenCapturer,
       openQuickControls: (tab) => getQuickControls().open(undefined, { tab }),
+      avatarTools,
       voicePersistence: {
         get: () => settings.sttSettings.get().enabled,
         set: settings.sttSettings.setEnabled,
@@ -183,7 +194,7 @@ const realFactories: ConfiguredBootstrapFactories = {
     register(hitTest.stop);
     wireGaze({ renderer, gazeSettings, register });
 
-    const locomotion = wireLocomotion({
+    locomotion = wireLocomotion({
       bus,
       renderer,
       getConfig: () => config.get(),
@@ -254,6 +265,7 @@ const realFactories: ConfiguredBootstrapFactories = {
       summonHotkey,
       vocabulary,
       sitter: locomotion.sitter,
+      avatarTools,
       stopTurn,
       noteInteraction: () => proactiveSource.noteInteraction(),
     };

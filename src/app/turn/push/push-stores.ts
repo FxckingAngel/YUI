@@ -19,6 +19,7 @@ import {
   type PushSocket,
   pushVocabularyOf,
 } from "../../../io/chat/push/push-socket";
+import type { ClientTool } from "../../../io/chat/tools/client-tools";
 import type { ExpressVocabulary } from "../../../io/chat/vocabulary/express-vocabulary";
 import {
   createChatIdSettings,
@@ -42,9 +43,15 @@ export function createPushStores(deps: {
   delegationHistory: DelegationHistory;
   reasoning: ReasoningStore;
   stopTurn(): void;
-  bind(deps: { vocabulary: () => ExpressVocabulary; stopTurn: () => void }): void;
+  bind(deps: {
+    vocabulary: () => ExpressVocabulary;
+    stopTurn: () => void;
+    avatarTools?: readonly ClientTool[];
+  }): void;
 } {
   let publishedVocabulary: (() => ExpressVocabulary) | null = null;
+  // The avatar tools land with bind(); the socket declares them in `hello.tools`.
+  let avatarTools: readonly ClientTool[] = [];
   // The panel's session reset stops the running turn the way the stop button does; the shared
   // closure exists once the configured bootstrap has wired it.
   let stopTurn: () => void = () => {};
@@ -54,6 +61,7 @@ export function createPushStores(deps: {
     chatId: () => chatIdSettings.get().chat_id,
     getKey: deps.getChatKey,
     vocabulary: () => pushVocabularyOf(publishedVocabulary?.()),
+    tools: () => avatarTools.map((tool) => tool.definition),
   });
   deps.register(pushSocket.dispose);
   deps.register(chatIdSettings.dispose);
@@ -69,9 +77,14 @@ export function createPushStores(deps: {
     delegationHistory,
     reasoning,
     stopTurn: () => stopTurn(),
-    bind: (bound) => {
+    bind: (bound: {
+      vocabulary: () => ExpressVocabulary;
+      stopTurn: () => void;
+      avatarTools?: readonly ClientTool[];
+    }) => {
       publishedVocabulary = bound.vocabulary;
       stopTurn = bound.stopTurn;
+      avatarTools = bound.avatarTools ?? [];
     },
   };
 }

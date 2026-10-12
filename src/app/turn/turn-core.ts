@@ -12,6 +12,7 @@ import type { ReasoningStore } from "../../io/bridge/reasoning/reasoning-store";
 import type { PushSocket } from "../../io/chat/push/push-socket";
 import { appendRecord } from "../../io/chat/record/turn-record-log";
 import { selectFetch } from "../../io/chat/stream/chat-client";
+import { type ClientTool, createClientToolRegistry } from "../../io/chat/tools/client-tools";
 import { createLogger } from "../../logger";
 import type { Renderer } from "../../renderer";
 import type { SettingsStores } from "../../settings/settings-stores";
@@ -99,6 +100,8 @@ export async function wireTurnCore(
     voiceHost?: VoiceHost;
     /** A sustained user utterance began. */
     onVoiceTurnStart?: () => void;
+    /** The avatar tools of a window that has an executor, declared on every transport; a window without one passes none. */
+    avatarTools?: readonly ClientTool[];
     register: (dispose: () => void) => void;
     ensureActive: () => void;
   },
@@ -181,6 +184,7 @@ export async function wireTurnCore(
     pushTurns,
     pushSocket: pushSocket ?? null,
     getVocabulary: () => vocabulary!.vocabulary(),
+    avatarTools: deps.avatarTools,
     openQuickControls: deps.openQuickControls,
     showVoiceError: voiceErrorDwell.show,
     appendTurnRecord: (record) => appendRecord(record),
@@ -239,6 +243,7 @@ export async function wireTurnCore(
         register(
           wirePushTransport({
             socket: pushSocket,
+            tools: createClientToolRegistry(deps.avatarTools ?? []),
             turnOutput: voice.turnOutput,
             pushTurns,
             delegations,

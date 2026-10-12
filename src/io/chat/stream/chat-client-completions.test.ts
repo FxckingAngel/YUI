@@ -14,8 +14,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EndpointsConfig } from "../../../contract";
+import { type ClientTool, createClientToolRegistry } from "../tools/client-tools";
 import { type ChatRequest, type ChatStreamEvent, streamChat } from "./chat-client";
-import { type ClientTool, createClientToolRegistry } from "./client-tools";
 
 // ── openai SDK mock — chat.completions.create only (Responses branch untouched) ──
 const ccCreateMock = vi.fn();
@@ -105,6 +105,7 @@ const toolStub = (name: string, result: string | (() => Promise<string>) = "ok")
     },
   },
   execute: vi.fn(typeof result === "function" ? result : async () => result),
+  waitMs: 2000,
 });
 
 /** A cue-only tool, like the real generate_express: its result says nothing to the model. */

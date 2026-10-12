@@ -129,7 +129,7 @@ export interface Usage {
 
 /** Derived from client observation of function_call items from the backend's native tools (not express). */
 export interface ToolStatus {
-  state: "idle" | "running" | "done" | "error";
+  state: "idle" | "running" | "done" | "failed" | "error";
   /** function_call name. */
   tool_id?: string;
 }
@@ -384,7 +384,7 @@ export interface EndpointsConfig {
   tts_speaker?: string;
   /** Synthesis concurrency limit. Default 1 (serial) — applied by consumer (tts-pipeline), not loader. */
   tts_max_inflight?: number;
-  // Deprecated: removed in v0.6.0. Use client-declared tools (src/io/chat/stream/client-tools.ts).
+  // Deprecated: removed in v0.6.0. Use client-declared tools (src/io/chat/tools/client-tools.ts).
   /** Expression Broker MCP endpoint (streamable-http, example: `http://localhost:3201/mcp`). Skips vocab publish if not set. */
   broker_base_url?: string;
   /** Maximum context token count for the active chat model. */

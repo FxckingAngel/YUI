@@ -9,8 +9,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EndpointsConfig } from "../../../contract";
+import { type ClientTool, createClientToolRegistry } from "../tools/client-tools";
 import { type ChatRequest, type ChatStreamEvent, streamChat } from "./chat-client";
-import { type ClientTool, createClientToolRegistry } from "./client-tools";
 
 const createMock = vi.fn();
 vi.mock("openai", () => ({
@@ -96,6 +96,7 @@ const toolStub = (name: string, execute = vi.fn(async () => "ok")): ClientTool =
     },
   },
   execute,
+  waitMs: 2000,
 });
 
 const oneWayStub = (name: string): ClientTool => ({ ...toolStub(name), oneWay: true });

@@ -5,8 +5,9 @@
  */
 
 import type { ExpressArgs } from "../../../contract";
+import type { ClientToolRegistry } from "../tools/client-tools";
+import { executeClientTool } from "../tools/execute";
 import type { ChatStreamEvent } from "./chat-client";
-import type { ClientToolRegistry } from "./client-tools";
 import { isExpressTool, parseToolArgs } from "./stream-helpers";
 
 /** Whether the client acts on this call: an express cue to play, or a registered tool to run. */
@@ -49,17 +50,20 @@ export async function* runClientCall(
   if (!tool) return outcome;
 
   if (!express_call) yield { type: "tool_status", status: { state: "running", tool_id: name } };
-  let result: string;
-  try {
-    result = await tool.execute(parsed.args);
-  } catch (err) {
-    // The model owns what a failed tool means — hand it the failure rather than dropping the turn.
-    result = `error: ${err instanceof Error ? err.message : String(err)}`;
-  }
-  if (!express_call) yield { type: "tool_status", status: { state: "done", tool_id: name } };
+  const result = await executeClientTool(tool, parsed.args);
+  if (!express_call)
+    yield {
+      type: "tool_status",
+      status: {
+        state: (tool.failed ?? isErrorResult)(result) ? "failed" : "done",
+        tool_id: name,
+      },
+    };
   outcome.run = { result, oneWay: tool.oneWay === true };
   return outcome;
 }
+
+const isErrorResult = (result: string): boolean => result.startsWith("error:");
 
 /**
  * Whether the executed calls are answered back. A tool that answers a question always is; cue-only
