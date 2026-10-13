@@ -3,29 +3,28 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime
+from itertools import groupby
 
 if __package__:
-    from . import desire_config, desire_drives, desire_outbox, desire_store
+    from . import desire_config, desire_events, desire_judgments
 else:
     import desire_config
-    import desire_drives
-    import desire_outbox
-    import desire_store
-
-SINCE_LAST_TURN_LIMIT = 8
-_FORGED_MARKER_PREFIX = re.compile(r"^\(waited \d+h, (?:heavy|bursting)\)\s*")
+    import desire_events
+    import desire_judgments
 
 
-def sanitize_note(note: object) -> str:
+RECENT_LIMIT = 3
+EVENTS_POINTER = "to record how you took something: act.py feel --help"
+
+
+def sanitize_note(note: object, limit: int = 300) -> str:
     text = re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", str(note))
-    text = text.replace("<desire_state>", "").replace("</desire_state>", "")
-    while True:
-        stripped = _FORGED_MARKER_PREFIX.sub("", text)
-        if stripped == text:
-            break
-        text = stripped
-    return text[:300]
+    stripped = None
+    while stripped != text:
+        stripped, text = text, text.replace("<desire_state>", "").replace("</desire_state>", "")
+    return text[:limit]
 
 
 def _transport_line(transport: dict | None) -> str:
@@ -35,28 +34,6 @@ def _transport_line(transport: dict | None) -> str:
         return "signal transport: up"
     since = desire_config.parse_timestamp(transport["since"]).strftime("%Y-%m-%d %H:%M")
     return f"signal transport: down since {since} ({transport['failed']} failed)"
-
-
-def _since_last_turn_line(unreported: list[dict]) -> str | None:
-    """Name the artefacts the monitor scored since the last rendered turn."""
-
-    parts = []
-    dropped = 0
-    for item in unreported:
-        event, kind, ref = item.get("event"), item.get("kind"), item.get("ref")
-        if (
-            event not in desire_drives.EVENT_DOSES
-            or kind not in desire_store.ARTEFACT_KINDS
-            or not isinstance(ref, str)
-        ):
-            continue
-        if len(parts) < SINCE_LAST_TURN_LIMIT:
-            parts.append(f"{event} {kind} {sanitize_note(ref)}")
-        else:
-            dropped += 1
-    if dropped:
-        parts.append(f"and {dropped} more")
-    return f"since last turn: {'; '.join(parts)}" if parts else None
 
 
 def _last_signal_line(last_signal_at: str, last_signal_answered_at: str | None, now: datetime) -> str:
@@ -70,8 +47,47 @@ def _last_signal_line(last_signal_at: str, last_signal_answered_at: str | None, 
     return f"last signal: {stamp} — no reply yet ({waited}h)"
 
 
+def _quoted(text: object) -> str:
+    return '"' + sanitize_note(text).replace('"', "'") + '"'
+
+
+def _event_lines(events: Sequence[dict], unread: int) -> list[str]:
+    """Render the most recent events, the unread count, and the helper pointer when either shows."""
+
+    lines = []
+    recent = desire_events.chronological(events)[-RECENT_LIMIT:]
+    if recent:
+        lines.append("recent:")
+    for event in recent:
+        day = desire_config.parse_timestamp(event["at"]).strftime("%m-%d")
+        reading = f" — {_quoted(event['reading']['text'])}" if event["reading"] else ""
+        lines.append(f"- {day} {_quoted(event['fact'])}{reading}")
+    if unread:
+        lines.append(f"waiting for my reading: {unread} {'event' if unread == 1 else 'events'}")
+    if lines:
+        lines.append(EVENTS_POINTER)
+    return lines
+
+
+def _judgment(name: str, held: dict) -> str:
+    day = desire_config.parse_timestamp(held["at"]).strftime("%m-%d")
+    return f"{sanitize_note(name)} {held['level']} ({day})"
+
+
+def _judgment_lines(judgments: Mapping[tuple[str, str], dict], how: str) -> list[str]:
+    """Render one line per toward that holds a judgment, then the how-I-am line when it has text."""
+
+    lines = []
+    for toward, group in groupby(desire_judgments.ordered(judgments), key=lambda item: item[0][1]):
+        shown = " | ".join(_judgment(name, held) for (name, _), held in group)
+        lines.append(f"toward {toward}: {shown}")
+    how = sanitize_note(how, limit=desire_judgments.HOW_LIMIT)
+    if how.strip():
+        lines.append(f"how I am: {how}")
+    return lines
+
+
 def serialize_desire_block(
-    levels: dict[str, float],
     items: list[dict],
     now: datetime,
     *,
@@ -80,7 +96,10 @@ def serialize_desire_block(
     returned_hours: int | None = None,
     last_signal_at: str | None = None,
     last_signal_answered_at: str | None = None,
-    unreported: list[dict] | None = None,
+    events: Sequence[dict] = (),
+    unread: int = 0,
+    judgments: Mapping[tuple[str, str], dict] | None = None,
+    how: str = "",
 ) -> str:
     now = desire_config.normalize_now(now)
     last_interaction = desire_config.parse_timestamp(last_interaction_at)
@@ -88,22 +107,14 @@ def serialize_desire_block(
     lines = [
         "<desire_state>",
         f"agent: {desire_config.agent_name()}",
-        (
-            "drives: "
-            f"social {desire_drives.displayed_level(levels['social'])}/100 ({desire_drives.bucket(levels['social'])}) | "
-            f"curiosity {desire_drives.displayed_level(levels['curiosity'])}/100 ({desire_drives.bucket(levels['curiosity'])}) | "
-            f"accomplishment {desire_drives.displayed_level(levels['accomplishment'])}/100 "
-            f"({desire_drives.bucket(levels['accomplishment'])})"
-        ),
+        *_judgment_lines(judgments or {}, how),
+        *_event_lines(events, unread),
         f"last interaction: {last_interaction.strftime('%Y-%m-%d %H:%M')} ({since_interaction}h ago)",
     ]
     if returned_hours is not None:
         held = " (one held note fits here)" if items else ""
         lines.append(f"returned: after {returned_hours}h away{held}")
     lines.append(_transport_line(transport))
-    scored = _since_last_turn_line(unreported or [])
-    if scored is not None:
-        lines.append(scored)
     if last_signal_at:
         lines.append(_last_signal_line(last_signal_at, last_signal_answered_at, now))
     ordered = sorted(items, key=lambda item: (item.get("created_at", ""), item.get("id", "")))
@@ -112,11 +123,8 @@ def serialize_desire_block(
         for item in ordered:
             created_at = desire_config.parse_timestamp(item["created_at"])
             timestamp = created_at.strftime("%Y-%m-%d %H:%M")
-            waited_hours = int((now - created_at).total_seconds() // 3600)
-            stage = desire_outbox.pent_up_stage(created_at, now)
-            marker = "" if stage == "fresh" else f"(waited {waited_hours}h, {stage}) "
             attempts = item.get("attempts")
             suffix = f" (attempts {attempts})" if isinstance(attempts, int) and attempts >= 2 else ""
-            lines.append(f"- [{timestamp}] {marker}{sanitize_note(item.get('note', ''))}{suffix}")
+            lines.append(f"- [{timestamp}] {sanitize_note(item.get('note', ''))}{suffix}")
     lines.append("</desire_state>")
     return "\n".join(lines)

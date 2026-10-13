@@ -13,7 +13,17 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import desire_config, desire_drives, desire_outbox, desire_render, desire_state, desire_store
+from . import (
+    desire_config,
+    desire_drives,
+    desire_events,
+    desire_gate_runs,
+    desire_judgments,
+    desire_outbox,
+    desire_render,
+    desire_state,
+    desire_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +34,6 @@ _CLIENT_CONTEXT = re.compile(r"<client_context>\n(?:(?!</?client_context>).)*?</
 _USER_TRIGGER = re.compile(r"^trigger: user message(?: \(user idle \d+min\))?$")
 _TRIGGER_LINE = re.compile(r"trigger: (?P<kind>\S+)")
 _TRIGGER_KINDS = ("proactive", "screen", "agent", "signals")
-_DRIVES_LINE = re.compile(
-    r"drives: social (?P<social>0|[1-9]\d?|100)/100 \((?P<social_bucket>low|mid|high)\) \| "
-    r"curiosity (?P<curiosity>0|[1-9]\d?|100)/100 \((?P<curiosity_bucket>low|mid|high)\) \| "
-    r"accomplishment (?P<accomplishment>0|[1-9]\d?|100)/100 "
-    r"\((?P<accomplishment_bucket>low|mid|high)\)"
-)
 _LAST_INTERACTION_LINE = re.compile(r"last interaction: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(\d+h ago\)")
 _RETURNED_LINE = re.compile(r"returned: after \d+h away(?: \(one held note fits here\))?")
 _TRANSPORT_LINE = re.compile(
@@ -38,19 +42,27 @@ _TRANSPORT_LINE = re.compile(
 _LAST_SIGNAL_LINE = re.compile(
     r"last signal: \d{4}-\d{2}-\d{2} \d{2}:\d{2} — (?:answered after \d+h|no reply yet \(\d+h\))"
 )
-_SINCE_LAST_TURN_LINE = re.compile(r"since last turn: \S.*")
 _PENT_UP_LINE = re.compile(r"pent-up \((?P<count>[1-9]\d*)\):")
 _OUTBOX_LINE = re.compile(r"- \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] [^\n]*")
+_RECENT_LINE = re.compile(r'- \d{2}-\d{2} "[^"\n]*"(?: — "[^"\n]*")?')
+_WAITING_LINE = re.compile(r"waiting for my reading: (?:1 event|(?:[2-9]|[1-9]\d+) events)")
+_TOWARD_LINE = re.compile(
+    rf"toward (?P<toward>{'|'.join(desire_judgments.TOWARDS)}): .* "
+    rf"(?:{'|'.join(desire_judgments.LEVELS)}) \(\d{{2}}-\d{{2}}\)"
+)
+_HOW_LINE = re.compile(r"how I am: .+")
 _CACHE_TTL = timedelta(minutes=10)
 _STATE_FILES = (
     "drives.json",
     "budget.json",
-    "cursor.json",
-    "monitor.json",
     "artefacts.json",
     "outbox.jsonl",
     "audit.jsonl",
-    "ticks.jsonl",
+    "events.jsonl",
+    "readings.jsonl",
+    "judgments.jsonl",
+    "feelings.json",
+    "how.md",
 )
 _turn_cache = None
 
@@ -92,24 +104,19 @@ def _already_injected(text):
     if opening < 0:
         return False
     lines = stripped[opening + 1 :].split("\n")
-    if len(lines) < 6 or lines[0] != "<desire_state>" or lines[-1] != "</desire_state>":
+    if len(lines) < 5 or lines[0] != "<desire_state>" or lines[-1] != "</desire_state>":
         return False
     if lines[1] != f"agent: {desire_config.agent_name()}":
         return False
-    drives = _DRIVES_LINE.fullmatch(lines[2])
-    if drives is None:
+    index = _after_event_lines(lines, _after_judgment_lines(lines, 2))
+    if index is None or _LAST_INTERACTION_LINE.fullmatch(lines[index]) is None:
         return False
-    for name in ("social", "curiosity", "accomplishment"):
-        if desire_drives.bucket(int(drives[name])) != drives[f"{name}_bucket"]:
-            return False
-    if _LAST_INTERACTION_LINE.fullmatch(lines[3]) is None:
-        return False
-    index = 5 if _RETURNED_LINE.fullmatch(lines[4]) is not None else 4
+    index += 1
+    if _RETURNED_LINE.fullmatch(lines[index]) is not None:
+        index += 1
     if _TRANSPORT_LINE.fullmatch(lines[index]) is None:
         return False
     index += 1
-    if _SINCE_LAST_TURN_LINE.fullmatch(lines[index]) is not None:
-        index += 1
     if _LAST_SIGNAL_LINE.fullmatch(lines[index]) is not None:
         index += 1
     if index == len(lines) - 1:
@@ -121,6 +128,33 @@ def _already_injected(text):
         and len(lines) == index + count + 2
         and all(_OUTBOX_LINE.fullmatch(line) is not None for line in lines[index + 1 : -1])
     )
+
+
+def _after_judgment_lines(lines, index):
+    """Return the index past the optional toward lines, in their fixed order, and the how-I-am line."""
+    for toward in desire_judgments.TOWARDS:
+        line = _TOWARD_LINE.fullmatch(lines[index])
+        if line is not None and line["toward"] == toward:
+            index += 1
+    return index + 1 if _HOW_LINE.fullmatch(lines[index]) is not None else index
+
+
+def _after_event_lines(lines, index):
+    """Return the index past the optional event lines that start at ``index``, or ``None`` when malformed."""
+    start = index
+    if lines[index] == "recent:":
+        index += 1
+        while (
+            index - start <= desire_render.RECENT_LIMIT and _RECENT_LINE.fullmatch(lines[index]) is not None
+        ):
+            index += 1
+        if index == start + 1:
+            return None
+    if _WAITING_LINE.fullmatch(lines[index]) is not None:
+        index += 1
+    if index == start:
+        return index
+    return index + 1 if lines[index] == desire_render.EVENTS_POINTER else None
 
 
 def _trigger_kind(text):
@@ -138,11 +172,11 @@ def _trigger_kind(text):
     return "none"
 
 
-def _build_desire_block(drives, outbox, transport, now, *, returned_hours=None, unreported=()):
-    levels = desire_drives.drive_levels(drives, now)
+def _build_desire_block(
+    drives, outbox, transport, now, *, returned_hours=None, events=(), unread=0, judgments=None, how=""
+):
     visible = desire_outbox.visible_outbox(outbox, now)
     block = desire_render.serialize_desire_block(
-        levels,
         visible,
         now,
         last_interaction_at=drives["last_interaction_at"],
@@ -150,7 +184,10 @@ def _build_desire_block(drives, outbox, transport, now, *, returned_hours=None, 
         returned_hours=returned_hours,
         last_signal_at=drives.get("last_signal_at"),
         last_signal_answered_at=drives.get("last_signal_answered_at"),
-        unreported=list(unreported),
+        events=events,
+        unread=unread,
+        judgments=judgments,
+        how=how,
     )
     return block, tuple(item["id"] for item in visible)
 
@@ -211,8 +248,15 @@ def _rewrite(kwargs, event):
 
     state_dir = desire_config.resolve_state_dir()
     text_hash = hashlib.sha256(original_text.encode("utf-8")).hexdigest()
-    cache_key = (str(state_dir.resolve()), text_hash)
+    gate_started = desire_gate_runs.gate_started(original_text, kwargs.get("turn_id") or None)
+    cache_key = (str(state_dir.resolve()), text_hash, gate_started)
 
+    cached = _turn_cache
+    cache_hit = cached is not None and cached["key"] == cache_key and now - cached["last_hit"] <= _CACHE_TTL
+    event["cache_hit"] = cache_hit
+    new_turn = cached is None or cached["key"] != cache_key
+
+    events, unread, judgments, how = [], [], {}, ""
     initialized = (state_dir / "state.lock").exists() or any(
         (state_dir / name).exists() for name in _STATE_FILES
     )
@@ -221,13 +265,14 @@ def _rewrite(kwargs, event):
             drives = desire_drives.read_drives_snapshot(state_dir, now)
             outbox = desire_store.read_jsonl(state_dir / "outbox.jsonl")
             transport = desire_store.read_transport(state_dir)
-            artefacts = desire_store.read_artefacts(state_dir)
+            if not cache_hit:
+                events, unread = desire_events.events_view_and_unread(state_dir)
+                judgments = {} if gate_started else desire_judgments.present(state_dir)
+                how = desire_judgments.read_how(state_dir)
     else:
         drives = desire_drives.default_drives(now)
         outbox = []
         transport = None
-        artefacts = None
-    unreported = artefacts["unreported"] if artefacts is not None else []
 
     staged_drives = copy.deepcopy(drives)
     trigger = _trigger_kind(original_text)
@@ -249,16 +294,20 @@ def _rewrite(kwargs, event):
         if _answers_signal(drives):
             staged_drives["last_signal_answered_at"] = now.isoformat()
 
-    cached = _turn_cache
-    cache_hit = cached is not None and cached["key"] == cache_key and now - cached["last_hit"] <= _CACHE_TTL
-    event["cache_hit"] = cache_hit
-    new_turn = cached is None or cached["key"] != cache_key
     if cache_hit:
         block = cached["block"]
         included_ids = cached["included_ids"]
     else:
         block, included_ids = _build_desire_block(
-            staged_drives, outbox, transport, now, returned_hours=returned_hours, unreported=unreported
+            staged_drives,
+            outbox,
+            transport,
+            now,
+            returned_hours=returned_hours,
+            events=events,
+            unread=len(unread),
+            judgments=judgments,
+            how=how,
         )
 
     rewritten = copy.deepcopy(request)
@@ -316,9 +365,6 @@ def _rewrite(kwargs, event):
             "last_hit": now,
         }
 
-        if new_turn and unreported:
-            _clear_unreported(state_dir, unreported)
-
         if new_turn:
             try:
                 desire_store.append_jsonl(
@@ -328,6 +374,7 @@ def _rewrite(kwargs, event):
                         "event": "turn",
                         "trigger": trigger,
                         "platform": _safe_id(kwargs.get("platform")) or "none",
+                        "gate": gate_started,
                     },
                 )
             except Exception:  # noqa: BLE001, S110 - the turn trail must never affect delivery
@@ -335,16 +382,6 @@ def _rewrite(kwargs, event):
 
     event["outcome"] = "injected"
     return {"request": rewritten, "source": "yui-desire", "reason": "desire-state"}
-
-
-def _clear_unreported(state_dir, rendered):
-    """Drop the entries this turn's block reported, keeping anything the monitor added since."""
-    current = desire_store.read_artefacts(state_dir)
-    if current is None:
-        return
-    remaining = [item for item in current["unreported"] if item not in rendered]
-    if remaining != current["unreported"]:
-        desire_store.write_json_atomic(state_dir / "artefacts.json", {**current, "unreported": remaining})
 
 
 def _safe_id(value):

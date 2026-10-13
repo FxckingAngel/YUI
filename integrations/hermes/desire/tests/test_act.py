@@ -6,7 +6,7 @@ import pytest
 from conftest import AGENT_NAME
 
 import act
-import desire_drives
+import desire_events
 import desire_state
 import desire_store
 
@@ -75,81 +75,6 @@ def test_action_and_monitor_share_budget_caps():
         "self_comments": 1,
         "prs": 0,
     }
-
-
-def test_satisfy_prints_event_and_reward(state_dir, at, capsys):
-    result = act.main(
-        ["satisfy", "praised", "--ref", "he said the fix reads well"],
-        now=at("2026-08-25T12:00:00+09:00"),
-    )
-
-    captured = capsys.readouterr()
-    assert result == 0
-    assert captured.out == "satisfied praised reward=0.0959\n"
-    assert captured.err == ""
-
-
-def test_satisfy_learned_lowers_curiosity_by_its_dose(state_dir, at, state_helpers, capsys):
-    _, _, read_json, _ = state_helpers
-    now = at("2026-08-25T12:00:00+09:00")
-    before = desire_drives.default_drives(now)["curiosity"]["level"]
-
-    result = act.main(["satisfy", "learned", "--ref", "https://github.com/x/y/commit/abc"], now=now)
-
-    captured = capsys.readouterr()
-    assert result == 0
-    assert captured.out.startswith("satisfied learned reward=")
-    assert captured.err == ""
-    curiosity = read_json(state_dir / "drives.json")["curiosity"]["level"]
-    assert curiosity == before - desire_drives.EVENT_DOSES["learned"]["curiosity"]
-
-
-def test_satisfy_learned_refuses_a_source_reported_twice(state_dir, at, capsys):
-    now = at("2026-08-25T12:00:00+09:00")
-    ref = "https://github.com/x/y/commit/abc"
-    assert act.main(["satisfy", "learned", "--ref", ref], now=now) == 0
-    capsys.readouterr()
-
-    assert act.main(["satisfy", "learned", "--ref", ref], now=now) == 1
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == f"already reported: {ref}\n"
-
-
-def test_satisfy_learned_refuses_a_source_past_the_daily_cap(state_dir, at, capsys):
-    now = at("2026-08-25T12:00:00+09:00")
-    for index in range(6):
-        assert act.main(["satisfy", "learned", "--ref", f"source {index}"], now=now) == 0
-    capsys.readouterr()
-
-    assert act.main(["satisfy", "learned", "--ref", "one more source"], now=now) == 1
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == "over budget: learned daily cap is 6\n"
-
-
-@pytest.mark.parametrize("event", ["progressed", "shipped"])
-def test_satisfy_refuses_the_events_the_monitor_derives(state_dir, at, event, capsys):
-    with pytest.raises(SystemExit) as failure:
-        act.main(["satisfy", event, "--ref", "self-reported"], now=at("2026-08-25T12:00:00+09:00"))
-
-    assert failure.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
-
-
-def test_satisfy_cap_exits_one_with_clear_refusal(state_dir, at, capsys):
-    now = at("2026-08-25T12:00:00+09:00")
-    for index in range(4):
-        assert act.main(["satisfy", "praised", "--ref", f"praise {index}"], now=now) == 0
-    capsys.readouterr()
-
-    assert act.main(["satisfy", "praised", "--ref", "one more"], now=now) == 1
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == "over budget: praised daily cap is 4\n"
 
 
 def test_signal_defaults_to_yui_agent_ingress_port(state_dir, at, monkeypatch):
@@ -524,10 +449,8 @@ def test_report_posts_its_own_kind_without_touching_the_signal_budget(state_dir,
         "issues": 0,
         "self_comments": 0,
         "prs": 0,
-        "events": {},
         "pending": {},
     }
-    assert read_json(state_dir / "monitor.json")["rises"] == 0
     assert (state_dir / "outbox.jsonl").read_bytes() == b""
     sent = read_jsonl(state_dir / "audit.jsonl")[-1]
     assert (sent["event"], sent["note"]) == ("report_sent", "one pull request today")
@@ -639,16 +562,10 @@ def test_outbox_release_preserves_malformed_lines_and_leaves_others_untouched(st
     assert lines == ["{malformed}", valid_b]
 
 
-def test_feedback_get_set_and_outbox_list(state_dir, at, state_helpers, capsys):
+def test_outbox_list_prints_the_active_items_without_auditing(state_dir, at, state_helpers, capsys):
     _, write_jsonl, _, read_jsonl = state_helpers
     now = at("2026-08-25T12:00:00+09:00")
     desire_state.bootstrap(now)
-    changed = "2026-08-25T11:30:00+09:00"
-    assert act.main(["feedback", "--set", changed], now=now) == 0
-    audit_after_set = read_jsonl(state_dir / "audit.jsonl")
-    assert act.main(["feedback", "--get"], now=now) == 0
-    assert capsys.readouterr().out.strip() == changed
-    assert read_jsonl(state_dir / "audit.jsonl") == audit_after_set
     item = {
         "id": "one",
         "created_at": now.isoformat(),
@@ -657,23 +574,10 @@ def test_feedback_get_set_and_outbox_list(state_dir, at, state_helpers, capsys):
         "surfaced_at": None,
     }
     write_jsonl(state_dir / "outbox.jsonl", [item])
+    audit_before = read_jsonl(state_dir / "audit.jsonl")
     assert act.main(["outbox", "--list"], now=now) == 0
     assert json.loads(capsys.readouterr().out) == [item]
-    assert read_jsonl(state_dir / "audit.jsonl") == audit_after_set
-
-
-def test_feedback_set_bad_date_returns_one_line_error(state_dir, at, capsys):
-    result = act.main(
-        ["feedback", "--set", "not-a-date"],
-        now=at("2026-08-25T12:00:00+09:00"),
-    )
-
-    captured = capsys.readouterr()
-    assert result == 1
-    assert captured.out == ""
-    assert captured.err.strip()
-    assert len(captured.err.splitlines()) == 1
-    assert "Traceback" not in captured.err
+    assert read_jsonl(state_dir / "audit.jsonl") == audit_before
 
 
 def test_http_error_status_does_not_mark_transport_down(state_dir, at, state_helpers, capsys):
@@ -999,3 +903,260 @@ def test_a_postponed_note_can_be_found_and_released_early(state_dir, at, state_h
 
     assert act.main(["outbox", "--release", listed[0]["id"], "--why", "he said it first"], now=now) == 0
     assert read_jsonl(state_dir / "outbox.jsonl") == []
+
+
+def exit_code(argv, now):
+    try:
+        return act.main(argv, now=now)
+    except SystemExit as stop:
+        return stop.code
+
+
+def test_feel_files_an_agent_event_with_its_reading(state_dir, at, capsys):
+    now = at("2026-08-25T12:00:00+09:00")
+
+    assert (
+        act.main(["feel", "--fact", " I opened a PR ", "--text", "proud", "--source-ref", "url"], now=now)
+        == 0
+    )
+
+    [event] = desire_events.events_view(state_dir)
+    assert capsys.readouterr().out == f"event {event['id']} reading {event['reading']['id']}\n"
+    assert (event["fact"], event["source"], event["source_ref"]) == ("I opened a PR", "agent", "url")
+    assert event["reading"]["text"] == "proud"
+
+
+def test_feel_reads_an_existing_event_and_refuses_an_unknown_or_retracted_one(state_dir, at, capsys):
+    now = at("2026-08-25T12:00:00+09:00")
+    event_id = desire_events.file_event(state_dir, "issue was closed", "monitor", "url", now)
+    retracted = desire_events.file_event(state_dir, "wrong", "monitor", "other", now)
+    desire_events.retract(state_dir, retracted, "not mine", now)
+
+    assert act.main(["feel", "--event", event_id, "--text", "relieved"], now=now) == 0
+    [event] = desire_events.events_view(state_dir)
+    assert capsys.readouterr().out == f"reading {event['reading']['id']}\n"
+    assert event["reading"]["text"] == "relieved"
+
+    assert act.main(["feel", "--event", "e-999999", "--text", "x"], now=now) == 3
+    assert capsys.readouterr().err == "unknown event\n"
+    assert act.main(["feel", "--event", retracted, "--text", "x"], now=now) == 3
+    assert capsys.readouterr().err == f"event {retracted} is retracted\n"
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["feel", "--fact", "x"], None),
+        (["feel", "--event", "e-000001", "--fact", "x", "--text", "y"], None),
+        (["feel", "--event", "e-000001", "--text", "y", "--source-ref", "r"], None),
+        (["feel", "--all"], None),
+        (["feel", "--list", "--text", "y"], None),
+        (["feel", "--unread"], None),
+        (["feel", "--list", "--unread", "--all"], None),
+        (["feel"], None),
+        (["feel", "--fact", "x", "--text", "   "], "empty --text"),
+        (["feel", "--fact", " ", "--text", "y"], "empty --fact"),
+        (["feel", "--fact", "x", "--text", "y", "--source-ref", ""], "empty --source-ref"),
+    ],
+)
+def test_feel_usage_errors_exit_two_and_write_nothing(state_dir, at, capsys, argv, message):
+    assert exit_code(argv, at("2026-08-25T12:00:00+09:00")) == 2
+
+    if message is not None:
+        assert capsys.readouterr().err.strip() == message
+    assert desire_events.events_view(state_dir) == []
+    assert not (state_dir / "events.jsonl").exists()
+
+
+def test_correct_and_retract_exit_codes_and_lines(state_dir, at, capsys):
+    now = at("2026-08-25T12:00:00+09:00")
+    event_id = desire_events.file_event(state_dir, "issue was closd", "monitor", "url", now)
+    gone = desire_events.file_event(state_dir, "wrong", "monitor", "other", now)
+
+    assert act.main(["correct", event_id, "--fact", "issue was closed"], now=now) == 0
+    assert capsys.readouterr().out == f"corrected {event_id}\n"
+    assert act.main(["retract", gone, "--why", "not mine"], now=now) == 0
+    assert capsys.readouterr().out == f"retracted {gone}\n"
+    assert act.main(["retract", gone, "--why", "again"], now=now) == 0
+    assert capsys.readouterr().out == f"already retracted {gone}\n"
+    assert act.main(["correct", gone, "--fact", "x"], now=now) == 1
+    assert act.main(["correct", "e-999999", "--fact", "x"], now=now) == 3
+    assert act.main(["retract", "e-999999", "--why", "x"], now=now) == 3
+    before = (state_dir / "events.jsonl").read_bytes()
+    capsys.readouterr()
+
+    assert act.main(["correct", event_id, "--fact", "  "], now=now) == 2
+    assert capsys.readouterr().err.strip() == "empty --fact"
+    assert act.main(["retract", event_id, "--why", ""], now=now) == 2
+    assert capsys.readouterr().err.strip() == "empty --why"
+    assert (state_dir / "events.jsonl").read_bytes() == before
+    assert [event["fact"] for event in desire_events.events_view(state_dir)] == ["issue was closed"]
+
+
+def test_feel_list_prints_one_line_per_event_by_time_with_ties_in_file_order(
+    state_dir, at, state_helpers, capsys
+):
+    _, write_jsonl, _, _ = state_helpers
+    now = at("2026-08-25T12:00:00+09:00")
+    write_jsonl(
+        state_dir / "events.jsonl",
+        [
+            {"id": "e-000003", "at": "2026-08-25T03:00:00+00:00", "fact": "late", "source": "monitor"},
+            {"id": "e-000001", "at": "2026-08-24T09:00:00+09:00", "fact": "tie a", "source": "agent"},
+            {"id": "e-000002", "at": "2026-08-24T00:00:00+00:00", "fact": 'tie b\n"x"', "source": "monitor"},
+        ],
+    )
+    write_jsonl(
+        state_dir / "readings.jsonl",
+        [{"id": "r-000001", "event_id": "e-000001", "at": "2026-08-24T10:00:00+09:00", "text": "glad"}],
+    )
+
+    assert act.main(["feel", "--list"], now=now) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "e-000001 2026-08-24 09:00 [agent] tie a — glad",
+        'e-000002 2026-08-24 09:00 [monitor] tie b "x" — (no reading)',
+        "e-000003 2026-08-25 12:00 [monitor] late — (no reading)",
+    ]
+
+
+def test_feel_list_shows_the_twenty_most_recent_unless_all(state_dir, at, state_helpers, capsys):
+    _, write_jsonl, _, _ = state_helpers
+    now = at("2026-08-25T12:00:00+09:00")
+    write_jsonl(
+        state_dir / "events.jsonl",
+        [
+            {
+                "id": f"e-{index:06x}",
+                "at": (now - timedelta(hours=30 - index)).isoformat(),
+                "fact": f"fact {index}",
+                "source": "monitor",
+            }
+            for index in range(25)
+        ],
+    )
+
+    assert act.main(["feel", "--list"], now=now) == 0
+    shown = capsys.readouterr().out.splitlines()
+    assert act.main(["feel", "--list", "--all"], now=now) == 0
+    every = capsys.readouterr().out.splitlines()
+
+    assert [line.split()[0] for line in shown] == [f"e-{index:06x}" for index in range(5, 25)]
+    assert len(every) == 25
+
+
+def test_judge_prints_what_it_recorded_and_refuses_with_its_exit_codes(state_dir, at, capsys):
+    now = at("2026-10-08T12:00:00+09:00")
+    event_id = desire_events.file_event(state_dir, "issue was closed", "monitor", "url", now)
+    gone = desire_events.file_event(state_dir, "wrong", "monitor", "other", now)
+    desire_events.retract(state_dir, gone, "not mine", now)
+
+    argv = ["judge", "sense of choosing", "--toward", "self", "--level", "very strong", "--event", event_id]
+    assert act.main([*argv, "--why", "I picked it"], now=now) == 0
+    assert capsys.readouterr().out == "judged sense of choosing toward self: very strong\n"
+    assert act.main(["judge", "sense of choosing", "--toward", "self", "--put-down"], now=now) == 0
+    assert capsys.readouterr().out == "put down sense of choosing toward self\n"
+
+    assert act.main(["judge", "warmth", "--toward", "user", "--level", "some"], now=now) == 1
+    assert "known names:\ncloseness\ntrust\n" in capsys.readouterr().err
+    assert act.main(["judge", "trust", "--toward", "user", "--put-down"], now=now) == 1
+    assert "no judgment to put down" in capsys.readouterr().err
+    for unusable in ("e-999999", gone):
+        assert (
+            act.main(["judge", "trust", "--toward", "user", "--level", "some", "--event", unusable], now=now)
+            == 3
+        )
+    assert [line["level"] for line in desire_store.read_jsonl(state_dir / "judgments.jsonl")] == [
+        "very strong",
+        None,
+    ]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["judge", "trust", "--toward", "user", "--level", "3"],
+        ["judge", "trust", "--toward", "user", "--level", "some", "--put-down"],
+        ["judge", "trust", "--toward", "user", "--put-down", "--event", "e-000001"],
+        ["judge", "trust", "--level", "some"],
+        ["judge", "trust", "--toward", "user"],
+        ["judge", "trust", "--list"],
+        ["judge", "--list", "--toward", "user"],
+        ["judge", "trust", "--toward", "others", "--level", "some"],
+        ["judge"],
+    ],
+)
+def test_judge_usage_errors_exit_two_and_write_nothing(state_dir, at, argv):
+    assert exit_code(argv, at("2026-10-08T12:00:00+09:00")) == 2
+
+    assert not (state_dir / "judgments.jsonl").exists()
+
+
+def test_feel_list_unread_prints_every_event_without_a_reading_in_the_list_order(state_dir, at, capsys):
+    now = at("2026-08-25T12:00:00+09:00")
+    assert act.main(["feel", "--list", "--unread"], now=now) == 0
+    assert capsys.readouterr().out == ""
+    ids = [
+        desire_events.file_event(state_dir, f"fact {index}", "monitor", None, now - timedelta(minutes=index))
+        for index in range(25)
+    ]
+    for event_id in ids[:3]:
+        desire_events.file_reading(state_dir, event_id, "noted", now)
+    desire_events.retract(state_dir, ids[3], "not mine", now)
+    desire_events.correct(state_dir, ids[4], "fact 4, corrected", now)
+
+    assert act.main(["feel", "--list", "--unread"], now=now) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split()[0] for line in lines] == ids[:3:-1]
+    assert lines[-1] == f"{ids[4]} 2026-08-25 11:56 [monitor] fact 4, corrected — (no reading)"
+
+
+def test_judge_list_prints_every_present_judgment_by_toward_then_name(state_dir, at, capsys):
+    now = at("2026-10-08T12:00:00+09:00")
+    act.main(["judge", "trust", "--toward", "world", "--level", "faint"], now=now)
+    act.main(["judge", "trust", "--toward", "user", "--level", "some", "--why", "she\nkept it"], now=now)
+    act.main(["judge", "doubt", "--toward", "user", "--level", "faint"], now=now - timedelta(days=3))
+    act.main(["judge", "tiredness", "--toward", "self", "--level", "strong"], now=now)
+    act.main(["judge", "tiredness", "--toward", "self", "--put-down"], now=now)
+    act.main(["judge", "pride", "--toward", "self", "--level", "some"], now=at("2026-10-08T23:30:00+00:00"))
+    capsys.readouterr()
+
+    assert act.main(["judge", "--list"], now=now) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "doubt toward user: faint (2026-10-05)",
+        "trust toward user: some (2026-10-08) — she kept it",
+        "pride toward self: some (2026-10-09)",
+        "trust toward world: faint (2026-10-08)",
+    ]
+
+
+def test_feel_grounds_prints_the_linked_events_in_the_list_format(state_dir, at, capsys):
+    now = at("2026-10-08T12:00:00+09:00")
+    event_id = desire_events.file_event(state_dir, "pull request was merged", "monitor", "url", now)
+    desire_events.file_reading(state_dir, event_id, "proud", now)
+    act.main(["judge", "pride", "--toward", "self", "--level", "some", "--event", event_id], now=now)
+    act.main(["judge", "trust", "--toward", "user", "--level", "some"], now=now)
+    capsys.readouterr()
+
+    assert act.main(["feel", "--grounds", "pride", "--toward", "self"], now=now) == 0
+    assert (
+        capsys.readouterr().out == f"{event_id} 2026-10-08 12:00 [monitor] pull request was merged — proud\n"
+    )
+    assert act.main(["feel", "--grounds", "trust", "--toward", "user"], now=now) == 0
+    assert capsys.readouterr().out == "no events linked\n"
+    assert act.main(["feel", "--grounds", "pride", "--toward", "world"], now=now) == 0
+    assert capsys.readouterr().out == "no judgment\n"
+    assert exit_code(["feel", "--grounds", "pride"], now) == 2
+    assert exit_code(["feel", "--grounds", "pride", "--toward", "self", "--list"], now) == 2
+
+
+def test_how_writes_up_to_500_characters_and_refuses_more(state_dir, at, capsys):
+    now = at("2026-10-08T12:00:00+09:00")
+
+    assert act.main(["how", "tired\nbut here"], now=now) == 0
+    assert (state_dir / "how.md").read_text(encoding="utf-8") == "tired\nbut here"
+    assert act.main(["how", "x" * 501], now=now) == 1
+    assert capsys.readouterr().err == "too long: 501 characters (limit 500)\n"
+    assert (state_dir / "how.md").read_text(encoding="utf-8") == "tired\nbut here"

@@ -13,11 +13,12 @@ from urllib import request as urllib_request
 from zoneinfo import ZoneInfo
 
 import desire_config
+import desire_events
+import desire_judgments
 import desire_outbox
 import desire_render
 import desire_state
 import desire_store
-import skill_usage
 
 KST = ZoneInfo("Asia/Seoul")
 CAPS = desire_state.CAPS
@@ -157,21 +158,6 @@ def _report(note, now, opener):
     return 1
 
 
-def _report_skills(now):
-    """Print the load counts of the skills the agent made, once a day at report time."""
-
-    state_dir = desire_config.resolve_state_dir()
-    with desire_store.state_lock(state_dir):
-        record = desire_store.read_artefacts(state_dir) or desire_store.default_artefacts(now)
-
-    # The database scan runs outside the lock, so a turn never waits on it.
-    text, failure = skill_usage.section(now, first_seen=record["skill_first_seen"])
-    if failure is not None:
-        _audit(state_dir, now, "report_skills_failed", reason=failure)
-    print(text)
-    return 0
-
-
 def _outbox_send(item_id, now, opener):
     state_dir = desire_config.resolve_state_dir()
     outbox_path = state_dir / "outbox.jsonl"
@@ -267,26 +253,6 @@ def _reservation_action(kind, operation, reservation_id, url, now):
         return 0
 
 
-def _feedback(operation, value, now):
-    state_dir = desire_config.resolve_state_dir()
-    with desire_store.state_lock(state_dir):
-        state = _normalized_state(state_dir, now)
-        if operation == "get":
-            print(state["cursor"]["last_feedback_check_at"])
-            return 0
-        try:
-            parsed = datetime.fromisoformat(value)
-            if parsed.tzinfo is None or parsed.utcoffset() is None:
-                raise ValueError("feedback timestamp must be timezone-aware")
-        except (TypeError, ValueError) as error:
-            print(f"invalid feedback timestamp: {error}", file=sys.stderr)
-            return 1
-        stamp = parsed.astimezone(KST).isoformat()
-        desire_store.write_json_atomic(state_dir / "cursor.json", {"last_feedback_check_at": stamp})
-        _audit(state_dir, now, "feedback_cursor_set", value=stamp)
-        return 0
-
-
 def _listed_item(item, now):
     """Mark an item the block and ``--send`` cannot reach yet."""
 
@@ -334,6 +300,195 @@ def _outbox_disposition(kind, item_id, why, note, until, now):
     return 0
 
 
+_FEEL_MODES = {
+    "fact": ({"fact", "text"}, {"source_ref"}),
+    "event": ({"event", "text"}, set()),
+    "list": ({"list"}, {"all"}),
+    "unread": ({"list", "unread"}, set()),
+    "grounds": ({"grounds", "toward"}, set()),
+}
+_FEEL_USAGE = (
+    "feel --fact TEXT --text TEXT [--source-ref TEXT] | feel --event ID --text TEXT"
+    " | feel --list [--all | --unread] | feel --grounds NAME --toward TOWARD"
+)
+
+
+def _feel_mode(args):
+    """Name the one mode the given options form, or ``None`` for any other combination."""
+
+    given = {
+        name
+        for name in ("fact", "text", "source_ref", "event", "grounds", "toward")
+        if getattr(args, name) is not None
+    }
+    given |= {name for name in ("list", "all", "unread") if getattr(args, name)}
+    return next(
+        (mode for mode, (needed, allowed) in _FEEL_MODES.items() if needed <= given <= needed | allowed),
+        None,
+    )
+
+
+def _empty_option(args, names):
+    """Name the first given option that is empty after stripping, as it is spelled on the command line."""
+
+    for name in names:
+        value = getattr(args, name, None)
+        if value is not None and not value.strip():
+            return "--" + name.replace("_", "-")
+    return None
+
+
+def _feel(args, now):
+    mode = _feel_mode(args)
+    if mode is None:
+        print(f"usage: {_FEEL_USAGE}", file=sys.stderr)
+        return 2
+    empty = _empty_option(args, ("fact", "text", "source_ref"))
+    if empty is not None:
+        print(f"empty {empty}", file=sys.stderr)
+        return 2
+    state_dir = desire_config.resolve_state_dir()
+    if mode in ("list", "unread"):
+        return _feel_list(state_dir, show_all=args.all, unread_only=mode == "unread")
+    if mode == "grounds":
+        return _feel_grounds(state_dir, args.grounds.strip(), args.toward)
+    if mode == "fact":
+        event_id, reading_id = desire_events.file_event_with_reading(
+            state_dir, args.fact, args.text, args.source_ref, now
+        )
+        print(f"event {event_id} reading {reading_id}")
+        return 0
+    try:
+        reading_id = desire_events.file_reading(state_dir, args.event, args.text, now)
+    except desire_events.UnknownEventError:
+        print("unknown event", file=sys.stderr)
+        return 3
+    except desire_events.RetractedEventError:
+        print(f"event {args.event} is retracted", file=sys.stderr)
+        return 3
+    print(f"reading {reading_id}")
+    return 0
+
+
+def _event_line(event):
+    stamp = desire_config.parse_timestamp(event["at"]).strftime("%Y-%m-%d %H:%M")
+    fact = desire_render.sanitize_note(event["fact"])
+    reading = desire_render.sanitize_note(event["reading"]["text"]) if event["reading"] else "(no reading)"
+    return f"{event['id']} {stamp} [{event['source']}] {fact} — {reading}"
+
+
+def _feel_list(state_dir, *, show_all, unread_only):
+    view, unread = desire_events.events_view_and_unread(state_dir)
+    if unread_only:
+        unread = set(unread)
+        view = [event for event in view if event["id"] in unread]
+    events = desire_events.chronological(view)
+    for event in events if show_all or unread_only else events[-20:]:
+        print(_event_line(event))
+    return 0
+
+
+def _feel_grounds(state_dir, name, toward):
+    if (name, toward) not in desire_judgments.present(state_dir):
+        print("no judgment")
+        return 0
+    events = desire_judgments.grounds(state_dir, name, toward)
+    for event in events:
+        print(_event_line(event))
+    if not events:
+        print("no events linked")
+    return 0
+
+
+_JUDGE_USAGE = (
+    "judge NAME --toward TOWARD --level LEVEL [--event ID ...] [--why TEXT]"
+    " | judge NAME --toward TOWARD --put-down [--why TEXT] | judge --list"
+)
+
+
+def _judge_mode(args):
+    """Name the one mode the given arguments form, or ``None`` for any other combination."""
+
+    if args.list:
+        plain = args.name is None and args.toward is None and args.level is None and not args.put_down
+        return "list" if plain and args.event is None and args.why is None else None
+    if args.name is None or args.toward is None or (args.level is not None) == args.put_down:
+        return None
+    if args.put_down:
+        return "put-down" if args.event is None else None
+    return "level"
+
+
+def _judge(args, now):
+    mode = _judge_mode(args)
+    if mode is None:
+        print(f"usage: {_JUDGE_USAGE}", file=sys.stderr)
+        return 2
+    state_dir = desire_config.resolve_state_dir()
+    if mode == "list":
+        return _judge_list(state_dir)
+    try:
+        desire_judgments.judge(state_dir, args.name, args.toward, args.level, args.event or [], args.why, now)
+    except (desire_events.UnknownEventError, desire_events.RetractedEventError) as error:
+        print(str(error), file=sys.stderr)
+        return 3
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    name = args.name.strip()
+    if mode == "put-down":
+        print(f"put down {name} toward {args.toward}")
+    else:
+        print(f"judged {name} toward {args.toward}: {args.level}")
+    return 0
+
+
+def _judge_list(state_dir):
+    for (name, toward), judgment in desire_judgments.ordered(desire_judgments.present(state_dir)):
+        day = desire_config.parse_timestamp(judgment["at"]).strftime("%Y-%m-%d")
+        why = f" — {desire_render.sanitize_note(judgment['why'])}" if judgment["why"] is not None else ""
+        print(f"{desire_render.sanitize_note(name)} toward {toward}: {judgment['level']} ({day}){why}")
+    return 0
+
+
+def _how(text):
+    try:
+        desire_judgments.write_how(desire_config.resolve_state_dir(), text)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    return 0
+
+
+def _correct(event_id, fact, now):
+    if not fact.strip():
+        print("empty --fact", file=sys.stderr)
+        return 2
+    try:
+        desire_events.correct(desire_config.resolve_state_dir(), event_id, fact, now)
+    except desire_events.UnknownEventError:
+        print("unknown event", file=sys.stderr)
+        return 3
+    except desire_events.RetractedEventError:
+        print(f"event {event_id} is retracted", file=sys.stderr)
+        return 1
+    print(f"corrected {event_id}")
+    return 0
+
+
+def _retract(event_id, why, now):
+    if not why.strip():
+        print("empty --why", file=sys.stderr)
+        return 2
+    try:
+        retracted = desire_events.retract(desire_config.resolve_state_dir(), event_id, why, now)
+    except desire_events.UnknownEventError:
+        print("unknown event", file=sys.stderr)
+        return 3
+    print(f"retracted {event_id}" if retracted else f"already retracted {event_id}")
+    return 0
+
+
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -341,9 +496,7 @@ def _parser():
     signal.add_argument("--note", required=True)
 
     report = commands.add_parser("report")
-    report_group = report.add_mutually_exclusive_group(required=True)
-    report_group.add_argument("--note")
-    report_group.add_argument("--skills", action="store_true")
+    report.add_argument("--note", required=True)
 
     for name in RESERVATIONS:
         action = commands.add_parser(name)
@@ -353,14 +506,44 @@ def _parser():
         group.add_argument("--release", metavar="ID")
         action.add_argument("--url")
 
-    satisfy = commands.add_parser("satisfy")
-    satisfy.add_argument("event", choices=["learned", "praised"])
-    satisfy.add_argument("--ref", required=True)
+    feel = commands.add_parser(
+        "feel",
+        description="Record how you took something that happened, or list what happened.",
+        usage=_FEEL_USAGE,
+    )
+    feel.add_argument("--fact", help="what happened, filed as a new event with your reading of it")
+    feel.add_argument("--text", help="how you took it")
+    feel.add_argument("--source-ref", help="a link or name for where the fact comes from")
+    feel.add_argument("--event", metavar="ID", help="an existing event to add your reading to")
+    feel.add_argument("--list", action="store_true", help="print the twenty most recent events")
+    feel.add_argument("--all", action="store_true", help="with --list, print every event")
+    feel.add_argument(
+        "--unread", action="store_true", help="with --list, print every event without a reading"
+    )
+    feel.add_argument("--grounds", metavar="NAME", help="print the events behind a present judgment")
+    feel.add_argument("--toward", choices=desire_judgments.TOWARDS, help="with --grounds, what it is toward")
 
-    feedback = commands.add_parser("feedback")
-    feedback_group = feedback.add_mutually_exclusive_group(required=True)
-    feedback_group.add_argument("--get", action="store_true")
-    feedback_group.add_argument("--set", metavar="ISO")
+    judge = commands.add_parser(
+        "judge", description="Hold, change or put down a judgment on a named feeling.", usage=_JUDGE_USAGE
+    )
+    judge.add_argument("name", nargs="?", help="a registered feeling name, quoted when it has spaces")
+    judge.add_argument("--toward", choices=desire_judgments.TOWARDS)
+    judge.add_argument("--level", choices=desire_judgments.LEVELS)
+    judge.add_argument("--put-down", action="store_true", help="end the present judgment")
+    judge.add_argument("--event", action="append", metavar="ID", help="an event behind it; may repeat")
+    judge.add_argument("--why")
+    judge.add_argument("--list", action="store_true", help="print every present judgment")
+
+    how = commands.add_parser("how", description="Write how you are right now, at most 500 characters.")
+    how.add_argument("text")
+
+    correct = commands.add_parser("correct", description="Correct the fact of an event.")
+    correct.add_argument("event_id", metavar="ID")
+    correct.add_argument("--fact", required=True)
+
+    retract = commands.add_parser("retract", description="Take back an event that did not happen.")
+    retract.add_argument("event_id", metavar="ID")
+    retract.add_argument("--why", required=True)
 
     outbox = commands.add_parser("outbox")
     outbox_group = outbox.add_mutually_exclusive_group(required=True)
@@ -392,7 +575,7 @@ def _run(argv, now, opener):
     if args.command == "signal":
         return _signal(args.note, now, opener)
     if args.command == "report":
-        return _report_skills(now) if args.skills else _report(args.note, now, opener)
+        return _report(args.note, now, opener)
     if args.command in RESERVATIONS:
         if args.reserve:
             operation, reservation_id = "reserve", None
@@ -404,16 +587,16 @@ def _run(argv, now, opener):
         else:
             operation, reservation_id = "release", args.release
         return _reservation_action(args.command, operation, reservation_id, args.url, now)
-    if args.command == "satisfy":
-        try:
-            reward = desire_state.satisfy(args.event, args.ref, now)
-        except ValueError as error:
-            print(str(error), file=sys.stderr)
-            return 1
-        print(f"satisfied {args.event} reward={reward:.4f}")
-        return 0
-    if args.command == "feedback":
-        return _feedback("get" if args.get else "set", args.set, now)
+    if args.command == "feel":
+        return _feel(args, now)
+    if args.command == "correct":
+        return _correct(args.event_id, args.fact, now)
+    if args.command == "retract":
+        return _retract(args.event_id, args.why, now)
+    if args.command == "judge":
+        return _judge(args, now)
+    if args.command == "how":
+        return _how(args.text)
     if args.list:
         return _outbox_list(now)
     if args.send is not None:

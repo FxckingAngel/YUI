@@ -5,13 +5,16 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
 logger = logging.getLogger(__name__)
 DEFAULT_SIGNALS_URL = "http://127.0.0.1:8770/signals"
+# The gate prints these to wake the agent; the middleware reads the first back from the request.
+WAKE_UNREAD_EVENTS = "desire gate: unread events"
+WAKE_HELD_NOTES = "desire gate: held notes"
 
 
 def normalize_now(value: datetime) -> datetime:
@@ -23,12 +26,6 @@ def normalize_now(value: datetime) -> datetime:
 def parse_timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     return normalize_now(parsed)
-
-
-def wake_day(now: datetime) -> str:
-    """Return the KST day the tick belongs to; the day rolls at 09:00."""
-
-    return (normalize_now(now) - timedelta(hours=9)).date().isoformat()
 
 
 _AGENT_SLUG = re.compile(r"[a-z0-9][a-z0-9-]*")

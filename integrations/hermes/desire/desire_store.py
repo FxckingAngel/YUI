@@ -17,7 +17,7 @@ if __package__:
 else:
     import desire_config
 
-ARTEFACT_KINDS = ("pr", "issue", "skill")
+ARTEFACT_KINDS = ("pr", "issue")
 _lock_guard = threading.RLock()
 _lock_local = threading.local()
 
@@ -69,6 +69,14 @@ def write_json_atomic(path: Path, value: object) -> None:
         os.replace(temporary, path)
 
 
+def write_text_atomic(path: Path, text: str) -> None:
+    path = Path(path)
+    with state_lock(path.parent):
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(text, encoding="utf-8")
+        os.replace(temporary, path)
+
+
 def _append_jsonl_locked(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(value, ensure_ascii=False) + "\n"
@@ -96,11 +104,11 @@ def _read_jsonl_locked(path: Path) -> tuple[list[dict], int]:
         return [], 0
     values: list[dict] = []
     dropped = 0
-    for line in path.read_text(encoding="utf-8").split("\n"):
-        if not line.strip():
+    for raw in path.read_bytes().split(b"\n"):
+        if not raw.strip():
             continue
         try:
-            value = json.loads(line)
+            value = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeError):
             dropped += 1
             continue
@@ -184,17 +192,16 @@ def record_transport(state_dir: Path, reachable: bool, now: datetime, *, source:
 
 
 def default_artefacts(now: datetime) -> dict:
-    """Return an empty record: no source has answered yet, so nothing is scored from it."""
+    """Return an empty record: no source has answered yet, so nothing is recorded from it."""
 
     stamp = desire_config.normalize_now(now).isoformat()
     return {
         "bootstrapped_at": stamp,
         "bootstrapped": [],
         "seen": {kind: [] for kind in ARTEFACT_KINDS},
-        "skill_first_seen": {},
         "shipped": [],
-        "learned": [],
-        "unreported": [],
+        "comments_from": {},
+        "comments_since": {},
     }
 
 
@@ -212,10 +219,9 @@ def read_artefacts(state_dir: Path) -> dict | None:
         "bootstrapped_at": value.get("bootstrapped_at"),
         "bootstrapped": [kind for kind in _text_list(value.get("bootstrapped")) if kind in ARTEFACT_KINDS],
         "seen": {kind: _text_list(seen.get(kind)) for kind in ARTEFACT_KINDS},
-        "skill_first_seen": _text_map(value.get("skill_first_seen")),
         "shipped": _text_list(value.get("shipped")),
-        "learned": _text_list(value.get("learned")),
-        "unreported": [item for item in _list(value.get("unreported")) if isinstance(item, dict)],
+        "comments_from": _stamps(value.get("comments_from")),
+        "comments_since": _stamps(value.get("comments_since")),
     }
 
 
@@ -227,10 +233,19 @@ def _text_list(value: object) -> list[str]:
     return [item for item in _list(value) if isinstance(item, str)]
 
 
-def _text_map(value: object) -> dict[str, str]:
+def _stamps(value: object) -> dict[str, str]:
+    """Keep the entries of a repository-to-timestamp map whose stamp parses."""
+
     if not isinstance(value, dict):
         return {}
-    return {key: item for key, item in value.items() if isinstance(key, str) and isinstance(item, str)}
+    kept = {}
+    for repo, stamp in value.items():
+        try:
+            desire_config.parse_timestamp(stamp)
+        except (TypeError, ValueError):
+            continue
+        kept[repo] = stamp
+    return kept
 
 
 def load_json(path: Path, default: object, now: datetime) -> object:
@@ -247,6 +262,22 @@ def load_json(path: Path, default: object, now: datetime) -> object:
             return json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeError, OSError):
             return _recover_invalid_json_locked(path, default, now)
+
+
+def load_normalized_json(path: Path, default, normalizer, now: datetime) -> object:
+    """Load a JSON state file, normalize it, and quarantine it when it does not normalize.
+
+    The caller holds ``state_lock``. A file whose normalized form differs is rewritten.
+    """
+
+    value = load_json(path, default, now)
+    try:
+        normalized = normalizer(value)
+    except (KeyError, TypeError, ValueError):
+        normalized = _recover_invalid_json_locked(path, default, now)
+    if normalized != value:
+        write_json_atomic(path, normalized)
+    return normalized
 
 
 def _recover_invalid_json_locked(path: Path, default: object, now: datetime) -> object:
