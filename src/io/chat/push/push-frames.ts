@@ -76,6 +76,12 @@ export interface ToolResultFrame {
   result: string;
 }
 
+export interface PlaybackFrame {
+  type: "playback";
+  turn_id: string;
+  ended: "failed";
+}
+
 /** The backend's reasoning as it is written, sent while the turn it names runs. */
 export interface ReasoningFrame {
   type: "reasoning";

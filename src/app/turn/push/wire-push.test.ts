@@ -214,16 +214,25 @@ describe("wirePushTransport", () => {
 
     expect(turnOutput.cueWithSpeech).toHaveBeenCalledWith({ emotion_id: "happy" });
     // The trailing newline is the segment boundary render-turn closes each segment with.
-    expect(turnOutput.delta).toHaveBeenCalledWith("All green.\n");
+    expect(turnOutput.delta).toHaveBeenCalledWith("All green.\n", {
+      turn_id: "7",
+      event_name: "backend",
+    });
     expect(records).toHaveLength(1);
   });
 
   it("marks the turn the render belongs to as having spoken text", () => {
     const turn = turnLog.begin(userEnv());
+    pushTurns.opened(String(turn.id), turn.trigger.event_name);
     wire();
+    socket.pushTurnEnd({ type: "turn_end", turn_id: String(turn.id) });
     socket.pushRender({ ...RENDER, turn_id: String(turn.id) });
 
     expect(turnLog.didSpeakText()).toBe(true);
+    expect(turnOutput.delta).toHaveBeenCalledWith("All green.\n", {
+      turn_id: String(turn.id),
+      event_name: turn.trigger.event_name,
+    });
   });
 
   it("leaves the turn's flag alone for a render whose id names no ledger turn", () => {
@@ -318,7 +327,7 @@ describe("wirePushTransport", () => {
 
   it("ends the live reasoning cycle on the turn's turn_end when no render comes", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushReasoning({ type: "reasoning", turn_id: "7", delta: "A" });
     expect(reasoning.get()).toEqual({ text: "A", live: true });
 
@@ -329,7 +338,7 @@ describe("wirePushTransport", () => {
 
   it("drops a reasoning delta of a turn the user stopped", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     pushTurns.cut();
     socket.pushReasoning({ type: "reasoning", turn_id: "7", delta: "A" });
 
@@ -338,7 +347,7 @@ describe("wirePushTransport", () => {
 
   it("abandons the reasoning still streaming for a turn the user stopped", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushReasoning({ type: "reasoning", turn_id: "7", delta: "A" });
     pushTurns.cut();
     socket.pushRender({ ...RENDER, reasoning: "AB" });
@@ -364,7 +373,7 @@ describe("wirePushTransport", () => {
 
   it("forgets the turn and logs it when its turn_end arrives", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
 
     socket.pushTurnEnd({ type: "turn_end", turn_id: "7" });
 
@@ -375,10 +384,10 @@ describe("wirePushTransport", () => {
 
   it("keeps a reasoning text an earlier render finished when a later frame is dropped", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushReasoning({ type: "reasoning", turn_id: "7", delta: "A" });
     socket.pushRender({ ...RENDER, reasoning: "AB" });
-    pushTurns.opened("8");
+    pushTurns.opened("8", "user.text_submitted");
     pushTurns.cut();
     socket.pushRender({ ...RENDER, turn_id: "8", reasoning: "CD" });
 
@@ -396,7 +405,7 @@ describe("wirePushTransport", () => {
   it("hands every tool_status frame to the tool-status sink and the turn's waiter", () => {
     wire();
     const waiter = vi.fn();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     void pushTurns.awaitTurnEnd("7", { onToolStatus: waiter });
     socket.pushToolStatus({
       type: "tool_status",
@@ -423,7 +432,7 @@ describe("wirePushTransport", () => {
 
   it("flows one idle to the chip when a turn ends with its tool still running", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushToolStatus({
       type: "tool_status",
       turn_id: "7",
@@ -437,7 +446,7 @@ describe("wirePushTransport", () => {
 
   it("a turn_end for another turn leaves the running tool's chip alone", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushToolStatus({
       type: "tool_status",
       turn_id: "7",
@@ -455,7 +464,7 @@ describe("wirePushTransport", () => {
 
   it("never flows idle behind a done frame, so the chip's done hold is not cut short", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushToolStatus({
       type: "tool_status",
       turn_id: "7",
@@ -491,7 +500,7 @@ describe("wirePushTransport", () => {
 
   it("never lights the chip for a frame of a turn the user stopped", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     pushTurns.cut();
     socket.pushToolStatus({
       type: "tool_status",
@@ -522,7 +531,7 @@ describe("wirePushTransport — error frames", () => {
   it("hands the frame's message to the turn's waiter, which still ends on the turn_end", async () => {
     wire();
     const onError = vi.fn();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     const ended = pushTurns.awaitTurnEnd("7", { onError });
 
     socket.pushError({ type: "error", turn_id: "7", message: "rate limit reached" });
@@ -539,7 +548,7 @@ describe("wirePushTransport — error frames", () => {
   it("leaves another turn's waiter alone", () => {
     wire();
     const onError = vi.fn();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     void pushTurns.awaitTurnEnd("7", { onError });
 
     socket.pushError({ type: "error", turn_id: "hermes-1", message: "boom" });
@@ -550,7 +559,7 @@ describe("wirePushTransport — error frames", () => {
   it("drops the frame of a turn the user stopped", () => {
     wire();
     const onError = vi.fn();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     void pushTurns.awaitTurnEnd("7", { onError });
     pushTurns.cut();
 
@@ -599,7 +608,7 @@ describe("wirePushTransport — tool calls", () => {
 
   it("refuses a tool_call of a turn the user cut", () => {
     wire(turnFeed, [look]);
-    pushTurns.opened("9");
+    pushTurns.opened("9", "user.text_submitted");
     pushTurns.cut();
     socket.pushToolCall(frame("c2", "9"));
 
@@ -628,8 +637,14 @@ describe("wirePushTransport — speech frames", () => {
     socket.pushSpeech(SPEECH);
     socket.pushSpeech({ ...SPEECH, segments: [{ speech: "Every one." }] });
 
-    expect(turnOutput.delta).toHaveBeenCalledWith("All green.\n");
-    expect(turnOutput.delta).toHaveBeenCalledWith("Every one.\n");
+    expect(turnOutput.delta).toHaveBeenCalledWith("All green.\n", {
+      turn_id: "7",
+      event_name: "backend",
+    });
+    expect(turnOutput.delta).toHaveBeenCalledWith("Every one.\n", {
+      turn_id: "7",
+      event_name: "backend",
+    });
     expect(turnOutput.end).not.toHaveBeenCalled();
 
     socket.pushRender({ ...RENDER, segments: [] });
@@ -695,7 +710,7 @@ describe("wirePushTransport — speech frames", () => {
 
   it("drops a cut turn's open utterance: one transcript entry before the user's next, no end()", () => {
     wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushSpeech(SPEECH);
     pushTurns.cut();
     // The user's own half of the turn that cut the reply.
@@ -712,7 +727,7 @@ describe("wirePushTransport — speech frames", () => {
   it("brings the thinking bridge down on the first speech frame, once", () => {
     wire();
     const onFirstRender = vi.fn();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     void pushTurns.awaitTurnEnd("7", { onFirstRender });
     socket.pushSpeech(SPEECH);
 
@@ -735,7 +750,7 @@ describe("wirePushTransport — speech frames", () => {
   it("stops hearing cuts and the frame wait once disposed", () => {
     vi.useFakeTimers();
     const dispose = wire();
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushSpeech(SPEECH);
     dispose();
     pushTurns.cut();
@@ -748,7 +763,7 @@ describe("wirePushTransport — speech frames", () => {
 
 describe("wirePushTransport — teardown through the shared turn feed", () => {
   function lightToolAndCycle(feed: TurnFeed, cycle: "push" | "stream"): void {
-    pushTurns.opened("7");
+    pushTurns.opened("7", "user.text_submitted");
     socket.pushToolStatus({
       type: "tool_status",
       turn_id: "7",
@@ -806,8 +821,8 @@ describe("wireStopButton", () => {
   }
 
   it("sends one stop naming exactly the turns outstanding", () => {
-    pushTurns.opened("A");
-    pushTurns.opened("B");
+    pushTurns.opened("A", "user.text_submitted");
+    pushTurns.opened("B", "user.text_submitted");
     wireStop();
     onStopCb?.();
 
@@ -817,9 +832,9 @@ describe("wireStopButton", () => {
 
   it("does not name a turn opened after the stop", () => {
     wireStop();
-    pushTurns.opened("A");
+    pushTurns.opened("A", "user.text_submitted");
     onStopCb?.();
-    pushTurns.opened("B");
+    pushTurns.opened("B", "user.text_submitted");
     onStopCb?.();
 
     expect(sendStop.mock.calls).toEqual([[["A"]], [["B"]]]);
@@ -835,7 +850,7 @@ describe("wireStopButton", () => {
 
   it("without a socket still stops the turn and sends nothing", () => {
     wireStop(false);
-    pushTurns.opened("A");
+    pushTurns.opened("A", "user.text_submitted");
     onStopCb?.();
 
     expect(pushTurns.isCut("A")).toBe(true);
