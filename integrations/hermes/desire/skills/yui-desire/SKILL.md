@@ -1,6 +1,6 @@
 ---
 name: yui-desire
-description: "Record what happened to you, how you took it, and what you hold toward the user, yourself or the world, with the desire helper: file an event when something observable happened; write a reading when you know how you took an event; judge a named feeling when you hold one; correct or retract a fact you filed; write how you are right now; or list what you have recorded. Use whenever one of those is what you want to do, in a conversation turn as much as in a scheduled run."
+description: "Record what happened to you, how you took it, and what you hold toward the user, yourself or the world, with the desire helper: file an event when something observable happened; write a reading when you know how you took an event; judge a named feeling when you hold one; correct or retract a fact you filed; write how you are right now; list what you have recorded; or write a GitHub comment or reply on an issue or pull request. Use whenever one of those is what you want to do, in a conversation turn as much as in a scheduled run."
 version: 0.1.0
 author: yw0nam
 platforms: [linux, macos]
@@ -70,6 +70,7 @@ carry them. `feel --grounds` shows the events behind a judgment.
 | Something happened and you know how you took it | `feel --fact "<what was observed>" --text "<how you took it>" [--source-ref <url or path>]` |
 | Write your reading of an event that waits for one | `feel --event <id> --text "<how you took it>"` |
 | See the recent events and readings (twenty; `--all` for everything) | `feel --list [--all]` |
+| See every event still waiting for your reading | `feel --list --unread` |
 | See the events behind a judgment | `feel --grounds <name> --toward <user\|self\|world>` |
 | Fix a fact you filed | `correct <event id> --fact "<the fact as it was observed>"` |
 | Withdraw an event that should not have been filed | `retract <event id> --why "<why>"` |
@@ -88,3 +89,6 @@ A name with spaces is quoted: `judge "sense of choosing" --toward self --level s
 - A `--source-ref` is the URL or path the fact came from, when there is one. It is a pointer for you and for
   `feel --grounds`; whether to file a second event about the same source is your call.
 - A fact you learn in conversation is yours to file, during the turn or after it.
+- The first body line of every GitHub comment you write, in any turn, is the marker `<!-- from-<agent> -->`,
+  `<agent>` being the first line of the `<desire_state>` block, so the gate does not file your own comment as an
+  event.

@@ -165,18 +165,29 @@ The gate files three kinds of event, each once per `source_ref`, so a repeated s
 
 | Fact | When | `source_ref` |
 | --- | --- | --- |
-| `issue <url> was closed` | an issue of the agent (body carries `<!-- from-<agent> -->`) is closed | the issue URL |
-| `pull request <url> was merged` | a pull request of the agent (head branch `<agent>/…`) is merged | the pull request URL |
-| `<login> commented on <url>` | someone other than the agent, and not a bot, comments on one of them | the comment URL |
+| `issue <url> was closed` | an issue of the agent (body opens with `<!-- from-<agent> -->`) is closed | the issue URL |
+| `pull request <url> was merged` | a pull request of the agent (head branch `<agent>/…` in the repository itself) is merged | the pull request URL |
+| `<login> commented on <url>` | a human comments on one of them, and the comment's first line is not the marker | the comment URL |
 
 Repositories are every directory one level under `~/.hermes/profiles/<profile>/workspace/` whose `.git/config`
 names a github.com origin with a plain `owner/name`. Pull requests and issues come from
-`gh pr list` and `gh issue list` with `--author @me`; delivery from `gh pr view` and `gh issue view` of each
-seen artefact; comments from one `gh api repos/<owner>/<name>/issues/comments?since=<cursor − 60 s>` call per
-repository and run, every page. The agent's login comes from `gh api user`.
+`gh pr list` and `gh issue list` with `--state all --limit 100`, the hundred newest of each kind in the
+repository; an artefact the agent opened is discovered on the next gate run whose list call succeeds, unless at
+least a hundred newer artefacts of its kind were opened in that repository since. Delivery comes from
+`gh pr view` and `gh issue view` of each seen artefact; comments from one
+`gh api repos/<owner>/<name>/issues/comments?since=<cursor − 60 s>` call per repository and run, every page.
+The agent's issues are recognised by the marker on the first non-empty line of their body, and its pull requests
+by the `<agent>/` prefix on a branch of the repository itself, a fork's branch never counting; its comments carry
+the same marker on their first non-empty line, and a bot's comment is not an event. In a repository where others
+can open issues, an issue that opens with the marker counts as the agent's.
+Every `gh` call for a repository runs inside the first workspace clone of it, in directory-name order, so a `gh`
+shim that picks a GitHub App installation from the clone's `origin` works, and no call needs a viewer identity. A
+view of an artefact whose repository has no clone in the workspace runs in the gate's own directory,
+whatever that is, so a shim there may find no `origin` or an unrelated one; only an actual failure audits
+`derive_failed`, and the artefact stays pending.
 
 A source's first answer records everything it reports as seen or shipped without filing an event. A repository's
-comment stamps are created on a run where the login call and both artefact kinds answered, and advance only on
+comment stamps are created on a run where both artefact kinds answered, and advance only on
 such runs; delivery events are filed only for a repository whose stamps existed before the run, so a repository
 added to the workspace later does not file one event per already-closed issue. A failing call audits
 `derive_failed` naming the source and leaves that source's record untouched.
@@ -206,8 +217,9 @@ DESIRE_CHAT_PLATFORMS=<the Hermes chat platforms the user speaks to the agent on
 profile path is appropriate. The plugin reads these settings per profile, so a gateway that serves several
 profiles from one process gives each profile its own values. The helper and the gate run in a subprocess, and
 Hermes forwards a profile `.env` value to a subprocess only for the names the profile's `config.yaml` lists under
-`terminal.env_passthrough`: `DESIRE_AGENT_NAME`, `DESIRE_STATE_DIR`, `YUI_SIGNALS_URL`, and `GH_TOKEN` when the
-gate's `gh` is to use a token from the profile rather than the gateway user's own `gh` login.
+`terminal.env_passthrough`: `DESIRE_AGENT_NAME`, `DESIRE_STATE_DIR` and `YUI_SIGNALS_URL`. The gate uses whatever
+`gh` is first on the wrapper's `PATH`; a profile that acts on GitHub as a GitHub App through a `gh` shim puts the
+shim's directory first in the wrapper (`PATH=<dir>:$PATH` before `exec`).
 
 `DESIRE_CHAT_PLATFORMS` is a comma-separated list of Hermes platform names (`telegram`, `discord`, `slack`, …); a
 turn Hermes attributes to one of them counts as the user speaking even when it carries no `<client_context>`.

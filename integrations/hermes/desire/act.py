@@ -304,11 +304,12 @@ _FEEL_MODES = {
     "fact": ({"fact", "text"}, {"source_ref"}),
     "event": ({"event", "text"}, set()),
     "list": ({"list"}, {"all"}),
+    "unread": ({"list", "unread"}, set()),
     "grounds": ({"grounds", "toward"}, set()),
 }
 _FEEL_USAGE = (
-    "feel --fact TEXT --text TEXT [--source-ref TEXT] | feel --event ID --text TEXT | feel --list [--all]"
-    " | feel --grounds NAME --toward TOWARD"
+    "feel --fact TEXT --text TEXT [--source-ref TEXT] | feel --event ID --text TEXT"
+    " | feel --list [--all | --unread] | feel --grounds NAME --toward TOWARD"
 )
 
 
@@ -320,7 +321,7 @@ def _feel_mode(args):
         for name in ("fact", "text", "source_ref", "event", "grounds", "toward")
         if getattr(args, name) is not None
     }
-    given |= {name for name in ("list", "all") if getattr(args, name)}
+    given |= {name for name in ("list", "all", "unread") if getattr(args, name)}
     return next(
         (mode for mode, (needed, allowed) in _FEEL_MODES.items() if needed <= given <= needed | allowed),
         None,
@@ -347,8 +348,8 @@ def _feel(args, now):
         print(f"empty {empty}", file=sys.stderr)
         return 2
     state_dir = desire_config.resolve_state_dir()
-    if mode == "list":
-        return _feel_list(state_dir, args.all)
+    if mode in ("list", "unread"):
+        return _feel_list(state_dir, show_all=args.all, unread_only=mode == "unread")
     if mode == "grounds":
         return _feel_grounds(state_dir, args.grounds.strip(), args.toward)
     if mode == "fact":
@@ -376,9 +377,13 @@ def _event_line(event):
     return f"{event['id']} {stamp} [{event['source']}] {fact} — {reading}"
 
 
-def _feel_list(state_dir, show_all):
-    events = desire_events.chronological(desire_events.events_view(state_dir))
-    for event in events if show_all else events[-20:]:
+def _feel_list(state_dir, *, show_all, unread_only):
+    view, unread = desire_events.events_view_and_unread(state_dir)
+    if unread_only:
+        unread = set(unread)
+        view = [event for event in view if event["id"] in unread]
+    events = desire_events.chronological(view)
+    for event in events if show_all or unread_only else events[-20:]:
         print(_event_line(event))
     return 0
 
@@ -512,6 +517,9 @@ def _parser():
     feel.add_argument("--event", metavar="ID", help="an existing event to add your reading to")
     feel.add_argument("--list", action="store_true", help="print the twenty most recent events")
     feel.add_argument("--all", action="store_true", help="with --list, print every event")
+    feel.add_argument(
+        "--unread", action="store_true", help="with --list, print every event without a reading"
+    )
     feel.add_argument("--grounds", metavar="NAME", help="print the events behind a present judgment")
     feel.add_argument("--toward", choices=desire_judgments.TOWARDS, help="with --grounds, what it is toward")
 

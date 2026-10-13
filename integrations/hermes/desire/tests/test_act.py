@@ -951,6 +951,8 @@ def test_feel_reads_an_existing_event_and_refuses_an_unknown_or_retracted_one(st
         (["feel", "--event", "e-000001", "--text", "y", "--source-ref", "r"], None),
         (["feel", "--all"], None),
         (["feel", "--list", "--text", "y"], None),
+        (["feel", "--unread"], None),
+        (["feel", "--list", "--unread", "--all"], None),
         (["feel"], None),
         (["feel", "--fact", "x", "--text", "   "], "empty --text"),
         (["feel", "--fact", " ", "--text", "y"], "empty --fact"),
@@ -1088,6 +1090,26 @@ def test_judge_usage_errors_exit_two_and_write_nothing(state_dir, at, argv):
     assert exit_code(argv, at("2026-10-08T12:00:00+09:00")) == 2
 
     assert not (state_dir / "judgments.jsonl").exists()
+
+
+def test_feel_list_unread_prints_every_event_without_a_reading_in_the_list_order(state_dir, at, capsys):
+    now = at("2026-08-25T12:00:00+09:00")
+    assert act.main(["feel", "--list", "--unread"], now=now) == 0
+    assert capsys.readouterr().out == ""
+    ids = [
+        desire_events.file_event(state_dir, f"fact {index}", "monitor", None, now - timedelta(minutes=index))
+        for index in range(25)
+    ]
+    for event_id in ids[:3]:
+        desire_events.file_reading(state_dir, event_id, "noted", now)
+    desire_events.retract(state_dir, ids[3], "not mine", now)
+    desire_events.correct(state_dir, ids[4], "fact 4, corrected", now)
+
+    assert act.main(["feel", "--list", "--unread"], now=now) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split()[0] for line in lines] == ids[:3:-1]
+    assert lines[-1] == f"{ids[4]} 2026-08-25 11:56 [monitor] fact 4, corrected — (no reading)"
 
 
 def test_judge_list_prints_every_present_judgment_by_toward_then_name(state_dir, at, capsys):
