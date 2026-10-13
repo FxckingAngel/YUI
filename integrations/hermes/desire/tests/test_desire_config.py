@@ -1,16 +1,16 @@
+import importlib
+import sys
+import types
+
 import pytest
 
 import desire_config
 
 
-def test_agent_name_and_profile_are_required(monkeypatch):
+def test_agent_name_is_required(monkeypatch):
     monkeypatch.delenv("DESIRE_AGENT_NAME", raising=False)
     with pytest.raises(desire_config.ConfigurationError, match="DESIRE_AGENT_NAME"):
         desire_config.agent_name()
-
-    monkeypatch.delenv("HERMES_PROFILE", raising=False)
-    with pytest.raises(desire_config.ConfigurationError, match="HERMES_PROFILE"):
-        desire_config.hermes_profile()
 
 
 def test_a_blank_agent_name_is_as_missing_as_an_absent_one(monkeypatch):
@@ -48,11 +48,76 @@ def test_every_convention_derives_from_the_agent_name(monkeypatch):
     assert desire_config.cron_job_name("tick") == "demo-desire-tick"
 
 
-def test_state_dir_falls_back_to_profile(monkeypatch, tmp_path):
+def test_state_dir_defaults_to_the_hermes_home(monkeypatch, tmp_path):
     monkeypatch.delenv("DESIRE_STATE_DIR", raising=False)
-    monkeypatch.setenv("HERMES_PROFILE", "test-profile")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    assert desire_config.resolve_state_dir() == tmp_path / "desire"
+
+    monkeypatch.delenv("HERMES_HOME")
     monkeypatch.setenv("HOME", str(tmp_path))
-    assert desire_config.resolve_state_dir() == tmp_path / ".hermes/profiles/test-profile/desire"
+    assert desire_config.resolve_state_dir() == tmp_path / ".hermes" / "desire"
+
+
+def test_a_left_behind_v040_state_dir_is_named_once(monkeypatch, tmp_path, caplog):
+    left = tmp_path / ".hermes" / "profiles" / "old" / "desire"
+    left.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_PROFILE", "old")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.delenv("DESIRE_STATE_DIR", raising=False)
+    monkeypatch.setattr(desire_config, "_left_behind_reported", False, raising=False)
+
+    with caplog.at_level("WARNING"):
+        assert desire_config.resolve_state_dir() == tmp_path / "elsewhere" / "desire"
+        desire_config.resolve_state_dir()
+
+    expected = (
+        f"DESIRE_STATE_DIR is not set: state is read from {tmp_path / 'elsewhere' / 'desire'}, "
+        f"and {left} is left unread. Set DESIRE_STATE_DIR to keep using it."
+    )
+    assert [record.getMessage() for record in caplog.records] == [expected]
+
+
+def test_the_v040_state_dir_in_use_raises_no_warning(monkeypatch, tmp_path, caplog):
+    home = tmp_path / ".hermes" / "profiles" / "old"
+    (home / "desire").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_PROFILE", "old")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("DESIRE_STATE_DIR", raising=False)
+    monkeypatch.setattr(desire_config, "_left_behind_reported", False, raising=False)
+
+    with caplog.at_level("WARNING"):
+        assert desire_config.resolve_state_dir() == home / "desire"
+
+    assert caplog.records == []
+
+
+def test_inside_hermes_settings_come_from_the_profile_scope_and_home(monkeypatch, tmp_path):
+    scope = {
+        "DESIRE_AGENT_NAME": "scoped",
+        "DESIRE_CHAT_PLATFORMS": "Discord, slack",
+        "YUI_SIGNALS_URL": "http://scoped.test/signals",
+    }
+    secret_scope = types.ModuleType("agent.secret_scope")
+    secret_scope.get_secret = lambda name, default=None: scope.get(name, default)
+    hermes_constants = types.ModuleType("hermes_constants")
+    hermes_constants.get_hermes_home = lambda: tmp_path / "home"
+    monkeypatch.setitem(sys.modules, "agent", types.ModuleType("agent"))
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", secret_scope)
+    monkeypatch.setitem(sys.modules, "hermes_constants", hermes_constants)
+    monkeypatch.delitem(sys.modules, "desire_config")
+    scoped = importlib.import_module("desire_config")
+    for name in (*scope, "DESIRE_STATE_DIR", "HERMES_PROFILE", "HERMES_HOME"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert scoped.agent_name() == "scoped"
+    assert scoped.chat_platforms() == frozenset({"discord", "slack"})
+    assert scoped.signals_url() == "http://scoped.test/signals"
+    assert scoped.resolve_state_dir() == tmp_path / "home" / "desire"
+
+    scope["DESIRE_STATE_DIR"] = str(tmp_path / "state")
+    assert scoped.resolve_state_dir() == tmp_path / "state"
 
 
 def test_wake_day_rolls_at_nine_kst(at):
