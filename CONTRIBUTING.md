@@ -59,6 +59,56 @@ and removed in v0.6.0) — see
   section; ask the user only for what genuinely requires them (audio playback,
   physical input feel).
 
+## Architecture map
+
+[`docs/agent-guide/architecture/map.js`](docs/agent-guide/architecture/map.js)
+is the map of the client. Open `index.html` beside it from disk to view it.
+
+- A module is one box of the overview: a named unit of the client with a
+  one-line description. Each module of the client sits in one of four groups
+  (user I/O, core logic, outside communication, shared state and wiring). The
+  user, backend agents, and outside services are boxes outside the groups.
+- A part is a folder or file of `src/` or `src-tauri/src` that belongs to one
+  module. Every `.ts` and `.rs` source file is inside the path of some part.
+- An exchange names what crosses between two parts as the code spells it, its
+  kind (call, callback, Tauri event, Tauri command, HTTP, WebSocket frame,
+  localStorage, cross-window bridge, user action), the transport it belongs to
+  (shared, request, push), and the wiring file that connects the two ends.
+- A link is a main path between two modules, drawn as a labelled line. The
+  viewer lists every exchange of a module when the module is selected.
+- A flow is a numbered sequence of steps between modules, each step naming
+  the exchanges behind it.
+- The window graph lists the windows and the channels each sends to another.
+
+Every change is presented on the map before its code is written. A change
+inside one part is presented as that, in one line, and skips steps 2 to 4. A
+change that adds or removes a module, a part, or an exchange, or changes what
+crosses an exchange, follows all four.
+
+1. Read the map and name the module and part the change goes into and the
+   modules and parts it touches.
+2. Present each exchange the change adds, changes, or removes, with the state
+   of those modules and exchanges before and after, and agree it in the
+   issue's **Architecture map** section. The form is free: a table, a list, a
+   before and after sketch, or the viewer.
+3. Edit `map.js` in the worktree, run `pnpm map:base`, and open the viewer's
+   **Compare with main** view to confirm the difference is the agreed one.
+4. Ship the `map.js` change in the same PR as the code. A PR whose code
+   changes a module, a part, or an exchange is complete only when `map.js`
+   states the shipped result.
+
+`pnpm map:check` fails when:
+
+- a part's path or an exchange's wiring file does not exist;
+- a `.ts` or `.rs` source file is inside no part's path, or a folder sits
+  beside the folders of other parts and belongs to none;
+- a part, a link, an exchange, or a flow step names a missing id, or an id is
+  used twice;
+- a link has no exchange in its direction, or a flow step cites an exchange
+  outside its two modules or of the other transport.
+
+CI runs it in the `web` job.
+
 ## Code rules
 
 - **Comments: minimal, present-tense only.** One line, only what the code
@@ -169,6 +219,7 @@ Run the same checks CI does — paste the block from the repo root:
 
 ```bash
 pnpm test                     # vitest
+pnpm map:check                # architecture map matches the tree
 pnpm typecheck:test           # tsc over the test files
 pnpm build                    # tsc + vite build
 pnpm docs:build               # vitepress build + dead-link check

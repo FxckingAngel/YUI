@@ -12,6 +12,9 @@ labels: ["feature"]
 <!-- Copy the relevant feature acceptance criteria. -->
 - [ ]
 
+## Architecture map
+<!-- The module and part of docs/agent-guide/architecture/map.js this work goes into, the modules it touches, the exchanges it adds, removes, or changes, and the state of those modules and exchanges before and after. For work inside one part, name the part and write "no exchange changes". -->
+
 ## Dependencies
 <!-- Prerequisite features/issues, contract deliverables -->
 
