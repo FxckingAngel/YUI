@@ -74,6 +74,7 @@ export interface ToolResultFrame {
   id: string;
   turn_id: string;
   result: string;
+  images?: string[];
 }
 
 export interface PlaybackFrame {

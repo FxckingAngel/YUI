@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 
+from ..tools.image_result import has_images
+
 logger = logging.getLogger(__name__)
 
 MAX_FRAME_BYTES = 262_144
@@ -59,3 +61,8 @@ def fit_frame(frame: dict) -> str | None:
         return None
     logger.warning("yui: %s frame over %d bytes, trimmed to fit", frame.get("type"), MAX_FRAME_BYTES)
     return body
+
+
+def inbound_frame_cap(frame: dict) -> int:
+    carries_images = frame.get("type") == "tool_result" and has_images(frame.get("images"))
+    return MAX_TURN_BYTES if frame.get("type") == "turn" or carries_images else MAX_FRAME_BYTES

@@ -12,7 +12,7 @@ import type { SummonHotkey } from "../io/window/pet/summon-hotkey";
 import { subscribeOsEvent } from "../io/window/tauri-listen";
 import { createLogger } from "../logger";
 import { mergeScreen } from "../settings/capture/screen-settings";
-import { isMacOS, isTauri } from "../tauri-env";
+import { isMacOS, isTauri, isWindows } from "../tauri-env";
 import { t } from "../ui/i18n";
 import { maybeShowFirstRunHint } from "../ui/notices/first-run-hint";
 import { wireIngressDeadNotice } from "../ui/notices/ingress-dead-notice";
@@ -120,7 +120,13 @@ const realFactories: ConfiguredBootstrapFactories = {
     // null until wireLocomotion has run.
     let locomotion: ReturnType<typeof wireLocomotion> | null = null;
     const avatarTools = isTauri()
-      ? createAvatarTools(() => locomotion?.getAvatarExecutor() ?? null)
+      ? createAvatarTools(() => locomotion?.getAvatarExecutor() ?? null, {
+          allowRequests: () => settings.screenshotSettings.get().allowRequests,
+          getWindow: () => locomotion?.frame.frameWindow() ?? null,
+          listMonitors: () => locomotion?.frame.listMonitors() ?? Promise.resolve([]),
+          pointsAreLogical: !isWindows(),
+          capturer: phase1.screenCapturer,
+        })
       : [];
     const core = await wireTurnCore(cfg, phase1, {
       getFrontmost: () => frontmostTracker.get(),

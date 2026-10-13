@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 
 from ..express import tools
+from ..tools.image_result import result_text
 from ..turns import session
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def _failed(tool_name: object, result: object, status: object) -> bool:
     if status == "error":
         return True
     name = str(tool_name or "")
-    text = result if isinstance(result, str) else ""
+    text = result_text(result)
     if name == "body_action":
         return text != "ok"
     if name == "look":

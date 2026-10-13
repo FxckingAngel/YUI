@@ -7,6 +7,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { AvatarExecutor } from "../../bridge/inbox/avatar-executor";
+import type { ScreenCapture } from "../../window/capture/screenshot-context";
 import { createAvatarTools } from "./avatar";
 import type { ClientTool } from "./client-tools";
 
@@ -110,13 +111,16 @@ describe("body_action — execute", () => {
 });
 
 describe("look — schema and execute", () => {
-  it("requires at and declares the two read targets", () => {
+  it("requires at and declares the three read targets", () => {
     const tool = createLookTool(() => null);
     expect(tool.definition.function.name).toBe("look");
     expect(tool.definition.function.parameters.required).toEqual(["at"]);
     expect(tool.definition.function.parameters.properties.at).toMatchObject({
       type: "string",
-      enum: ["body", "perch_targets"],
+      enum: ["body", "perch_targets", "screen"],
+    });
+    expect(tool.definition.function.parameters.properties.monitor).toMatchObject({
+      type: "integer",
     });
     expect(tool.waitMs).toBe(2000);
     expect(tool.timeoutResult).toBeUndefined();
@@ -126,14 +130,14 @@ describe("look — schema and execute", () => {
     const exec = executor();
     const tool = createLookTool(() => exec);
     const result = await tool.execute({ at: "body" });
-    expect(JSON.parse(result)).toEqual(await exec.state());
+    expect(JSON.parse(result as string)).toEqual(await exec.state());
   });
 
   it("at: perch_targets answers the perch candidates as a JSON string", async () => {
     const exec = executor();
     const tool = createLookTool(() => exec);
     const result = await tool.execute({ at: "perch_targets" });
-    expect(JSON.parse(result)).toEqual(await exec.perchTargets());
+    expect(JSON.parse(result as string)).toEqual(await exec.perchTargets());
   });
 
   it("answers error: missing field at when at is absent", async () => {
@@ -144,7 +148,7 @@ describe("look — schema and execute", () => {
   it("answers error: invalid field at for a target it does not know", async () => {
     const exec = executor();
     const tool = createLookTool(() => exec);
-    await expect(tool.execute({ at: "screen" })).resolves.toBe("error: invalid field at");
+    await expect(tool.execute({ at: "apps" })).resolves.toBe("error: invalid field at");
     expect(exec.state).not.toHaveBeenCalled();
     expect(exec.perchTargets).not.toHaveBeenCalled();
   });
@@ -152,5 +156,161 @@ describe("look — schema and execute", () => {
   it("answers error: unsupported when no executor exists yet", async () => {
     const tool = createLookTool(() => null);
     await expect(tool.execute({ at: "body" })).resolves.toBe("error: unsupported");
+  });
+});
+
+describe("look — screen requests", () => {
+  const bounds = (x: number, y: number, width: number, height: number, scaleFactor: number) => ({
+    position: { x, y },
+    size: { width, height },
+    workArea: { position: { x, y }, size: { width, height } },
+    scaleFactor,
+  });
+  // The layout tao reports on macOS: a 2x built-in and a 1x external at logical x 1512, whose
+  // physical rects overlap (0..3024 and 1512..3432).
+  const MAC_MONITORS = [bounds(0, 0, 3024, 1964, 2), bounds(1512, 0, 1920, 1080, 1)];
+  // Physical rects as Windows reports them: the 1.5x second display starts where the first ends.
+  const WINDOWS_MONITORS = [bounds(0, 0, 3840, 2160, 2), bounds(3840, 0, 2880, 1620, 1.5)];
+  const pet = (x: number, y: number, width: number, height: number, scale: number) => ({
+    outerPosition: async () => ({ x, y }),
+    outerSize: async () => ({ width, height }),
+    scaleFactor: async () => scale,
+  });
+
+  function screenTool(
+    allowRequests = true,
+    capture = vi.fn(
+      async (): Promise<ScreenCapture | null> => ({ data_url: "data:image/jpeg;base64,YQ==" }),
+    ),
+    available = true,
+    layout: {
+      window?: ReturnType<typeof pet>;
+      monitors?: ReturnType<typeof bounds>[];
+      pointsAreLogical?: boolean;
+    } = {},
+  ) {
+    const ports = {
+      allowRequests: () => allowRequests,
+      getWindow: () => layout.window ?? pet(1600, 100, 300, 400, 1),
+      listMonitors: async () => layout.monitors ?? MAC_MONITORS,
+      pointsAreLogical: layout.pointsAreLogical ?? true,
+      capturer: { capture: vi.fn(), captureAt: capture },
+    };
+    const tool = createAvatarTools(() => (available ? executor() : null), ports).find(
+      (t) => t.name === "look",
+    )!;
+    return { tool, capture };
+  }
+
+  it("screen permission off refuses capture and keeps the declaration", async () => {
+    const { tool, capture } = screenTool(false);
+    await expect(tool.execute({ at: "screen" })).resolves.toBe("error: screen capture is off");
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it("screen without monitor captures the centre of a window on the overlapping external display", async () => {
+    const { tool, capture } = screenTool();
+    await expect(tool.execute({ at: "screen" })).resolves.toEqual({
+      text: "screenshot of display 1",
+      images: ["data:image/jpeg;base64,YQ=="],
+    });
+    expect(capture).toHaveBeenCalledWith({ x: 1750, y: 300 });
+  });
+
+  it("screen without monitor divides a built-in window centre by the window scale", async () => {
+    const { tool, capture } = screenTool(true, undefined, true, {
+      window: pet(1000, 200, 600, 800, 2),
+    });
+    await expect(tool.execute({ at: "screen" })).resolves.toMatchObject({
+      text: "screenshot of display 0",
+    });
+    expect(capture).toHaveBeenCalledWith({ x: 650, y: 300 });
+  });
+
+  it("screen follows the window centre when the corner lies on the other display", async () => {
+    const { tool, capture } = screenTool(true, undefined, true, {
+      window: pet(1450, 100, 300, 400, 1),
+    });
+    await expect(tool.execute({ at: "screen" })).resolves.toMatchObject({
+      text: "screenshot of display 1",
+    });
+    expect(capture).toHaveBeenCalledWith({ x: 1600, y: 300 });
+  });
+
+  it("screen rounds a half-pixel centre to whole coordinates", async () => {
+    const { tool, capture } = screenTool(true, undefined, true, {
+      window: pet(1600, 100, 301, 401, 1),
+    });
+    await expect(tool.execute({ at: "screen" })).resolves.toMatchObject({
+      text: "screenshot of display 1",
+    });
+    expect(capture).toHaveBeenCalledWith({ x: 1751, y: 301 });
+  });
+
+  it.each([
+    [0, { x: 756, y: 491 }],
+    [1, { x: 2472, y: 540 }],
+  ])("screen with monitor %i captures that display's logical centre and names it", async (monitor, point) => {
+    const { tool, capture } = screenTool();
+    await expect(tool.execute({ at: "screen", monitor })).resolves.toEqual({
+      text: `screenshot of display ${monitor}`,
+      images: ["data:image/jpeg;base64,YQ=="],
+    });
+    expect(capture).toHaveBeenCalledWith(point);
+  });
+
+  it("screen passes physical points unchanged when points are not logical", async () => {
+    const { tool, capture } = screenTool(true, undefined, true, {
+      monitors: WINDOWS_MONITORS,
+      window: pet(4000, 100, 450, 600, 1.5),
+      pointsAreLogical: false,
+    });
+    await expect(tool.execute({ at: "screen" })).resolves.toMatchObject({
+      text: "screenshot of display 1",
+    });
+    expect(capture).toHaveBeenCalledWith({ x: 4225, y: 400 });
+    await tool.execute({ at: "screen", monitor: 1 });
+    expect(capture).toHaveBeenLastCalledWith({ x: 5280, y: 810 });
+  });
+
+  it.each([
+    -1,
+    2,
+    0.5,
+    "0",
+    null,
+  ])("screen rejects invalid monitor %s without capture", async (monitor) => {
+    const { tool, capture } = screenTool();
+    await expect(tool.execute({ at: "screen", monitor })).resolves.toBe(
+      "error: invalid field monitor",
+    );
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    new Error("capture denied"),
+  ])("screen capture failure returns an error string: %s", async (result) => {
+    const capture = vi.fn(async () => {
+      if (result instanceof Error) throw result;
+      return result;
+    });
+    const { tool } = screenTool(true, capture);
+    await expect(tool.execute({ at: "screen" })).resolves.toMatch(/^error:/);
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it("screen with unavailable executor answers unsupported", async () => {
+    const { tool, capture } = screenTool(true, undefined, false);
+    await expect(tool.execute({ at: "screen" })).resolves.toBe("error: unsupported");
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it.each(["body", "perch_targets"])("%s ignores monitor and screen permission", async (at) => {
+    const { tool, capture } = screenTool(false);
+    const result = await tool.execute({ at, monitor: "invalid" });
+    expect(typeof result).toBe("string");
+    expect(JSON.parse(result as string)).toBeTruthy();
+    expect(capture).not.toHaveBeenCalled();
   });
 });

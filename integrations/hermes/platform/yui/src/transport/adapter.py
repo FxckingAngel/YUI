@@ -35,7 +35,7 @@ from ..express.segments import build_segments, place_matched
 from ..speech import speech
 from ..tools import handler, pending, registry
 from ..turns import state
-from .frames import MAX_FRAME_BYTES, MAX_TURN_BYTES, encoded, fit_frame
+from .frames import MAX_FRAME_BYTES, MAX_TURN_BYTES, encoded, fit_frame, inbound_frame_cap
 from .playback import PlaybackNotices
 from .turn_images import cache_turn_images
 
@@ -72,8 +72,8 @@ def _turn_end(turn_id: str, token_usage: dict[str, int] | None) -> dict:
 
 
 def _fits(frame: dict, size: int) -> bool:
-    """Every frame but `turn` keeps the 256 KiB cap; `ready` states the larger turn size."""
-    cap = MAX_TURN_BYTES if frame.get("type") == "turn" else MAX_FRAME_BYTES
+    """Check the inbound frame against its text or image limit."""
+    cap = inbound_frame_cap(frame)
     if size <= cap:
         return True
     logger.warning("yui: dropped an oversize %s frame (%d bytes)", frame.get("type"), size)
@@ -622,7 +622,7 @@ class YuiAdapter(BasePlatformAdapter):
         if not call_id:
             logger.debug("yui: tool_result without an id chat=%s", chat_id)
             return
-        if not pending.resolve(chat_id, call_id, str(frame.get("result") or "")):
+        if not pending.resolve(chat_id, call_id, str(frame.get("result") or ""), frame.get("images")):
             logger.debug("yui: tool_result for an unknown call chat=%s id=%s", chat_id, call_id)
 
     def send_tool_call(self, chat_id: str, frame: dict) -> bool:

@@ -138,6 +138,7 @@ function runPush(frame: RenderFrame): Entry[] {
       onToolCall: () => () => {},
       onError: () => () => {},
       sendToolResult: () => false,
+      getMaxTurnBytes: () => undefined,
       onDelegations: () => () => {},
       onReasoning: () => () => {},
       onState: () => () => {},
