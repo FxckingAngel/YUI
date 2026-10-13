@@ -16,6 +16,8 @@ interface ContextProviders {
   getBodyState?: () => BodyState | undefined;
   getFrontmost?: () => FrontmostState | undefined;
   getPrevious?: () => PreviousTurn | undefined;
+  /** The switchable tools the window declares, with the switch state read at this turn. */
+  getToolSwitches?: () => ClientContext["tool_switches"];
   /** True once, for the user turn whose message woke the character on the bed. */
   takeMessageWake?: () => boolean;
 }
@@ -306,9 +308,9 @@ export async function buildContext(
     }
   }
 
-  return {
-    ctx,
-    clientContext: buildClientContext(
+  const switches = providers.getToolSwitches?.();
+  const clientContext = {
+    ...buildClientContext(
       ctx,
       env,
       providers.getBodyState?.(),
@@ -316,7 +318,10 @@ export async function buildContext(
       providers.getPrevious?.(),
       triggerKind(env.event_name) === "user" && providers.takeMessageWake?.() === true,
     ),
+    ...(switches?.length ? { tool_switches: switches } : {}),
   };
+
+  return { ctx, clientContext };
 }
 
 export function imageDataUrlsOf(ctx: InputContext): string[] {

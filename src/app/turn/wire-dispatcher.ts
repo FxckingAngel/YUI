@@ -146,6 +146,13 @@ export function wireDispatcher(deps: {
   // reasoning store without an owner naming the turn they belong to.
   const turnFeed = createTurnFeed({ onToolStatus: applyToolStatus, reasoning });
 
+  // Built per turn from the published vocabulary, so a live edit reaches the next tool schema.
+  const turnTools = () =>
+    clientToolsUnlessBrokered(
+      getEndpoints(),
+      createClientToolRegistry(createClientTools(getVocabulary(), avatarTools)),
+    );
+
   const backendCaller = createBackendCaller({
     get config() {
       return getEndpoints();
@@ -172,17 +179,13 @@ export function wireDispatcher(deps: {
     getBodyState: () => dispatcher.getBodyState(),
     getFrontmost,
     getPrevious: previousTurn.get,
+    getToolSwitches: () => turnTools()?.switches() ?? [],
     takeMessageWake,
     isBodyHeld,
     contextHistory,
     appendTurnRecord,
     getAgentSettings: () => agentSettings.get(),
-    // Built per turn from the published vocabulary, so a live edit reaches the next tool schema.
-    clientTools: () =>
-      clientToolsUnlessBrokered(
-        getEndpoints(),
-        createClientToolRegistry(createClientTools(getVocabulary(), avatarTools)),
-      ),
+    clientTools: turnTools,
     pushTurn: (frame) => pushSocket?.sendTurn(frame) ?? false,
     pushImageRoom: (frame) => pushSocket?.imageRoom(frame),
     onPushTurnCut: () => pushTurns.cut(),

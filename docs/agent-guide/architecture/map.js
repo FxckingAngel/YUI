@@ -1721,6 +1721,15 @@ globalThis.YUI_MAP =
       "wiring": "src/app/turn/wire-dispatcher.ts"
     },
     {
+      "id": "tool-switches-backend",
+      "from": "io/chat/tools",
+      "to": "dispatcher/backend",
+      "carries": "switch states of the declared tools, read per turn",
+      "kind": "callback",
+      "transport": "shared",
+      "wiring": "src/app/turn/wire-dispatcher.ts"
+    },
+    {
       "id": "vocabulary-push",
       "from": "io/chat/vocabulary",
       "to": "io/chat/push",
