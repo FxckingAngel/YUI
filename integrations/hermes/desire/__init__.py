@@ -17,6 +17,8 @@ from . import (
     desire_config,
     desire_drives,
     desire_events,
+    desire_gate_runs,
+    desire_judgments,
     desire_outbox,
     desire_render,
     desire_state,
@@ -44,6 +46,11 @@ _PENT_UP_LINE = re.compile(r"pent-up \((?P<count>[1-9]\d*)\):")
 _OUTBOX_LINE = re.compile(r"- \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] [^\n]*")
 _RECENT_LINE = re.compile(r'- \d{2}-\d{2} "[^"\n]*"(?: — "[^"\n]*")?')
 _WAITING_LINE = re.compile(r"waiting for my reading: (?:1 event|(?:[2-9]|[1-9]\d+) events)")
+_TOWARD_LINE = re.compile(
+    rf"toward (?P<toward>{'|'.join(desire_judgments.TOWARDS)}): .* "
+    rf"(?:{'|'.join(desire_judgments.LEVELS)}) \(\d{{2}}-\d{{2}}\)"
+)
+_HOW_LINE = re.compile(r"how I am: .+")
 _CACHE_TTL = timedelta(minutes=10)
 _STATE_FILES = (
     "drives.json",
@@ -53,6 +60,9 @@ _STATE_FILES = (
     "audit.jsonl",
     "events.jsonl",
     "readings.jsonl",
+    "judgments.jsonl",
+    "feelings.json",
+    "how.md",
 )
 _turn_cache = None
 
@@ -98,7 +108,7 @@ def _already_injected(text):
         return False
     if lines[1] != f"agent: {desire_config.agent_name()}":
         return False
-    index = _after_event_lines(lines, 2)
+    index = _after_event_lines(lines, _after_judgment_lines(lines, 2))
     if index is None or _LAST_INTERACTION_LINE.fullmatch(lines[index]) is None:
         return False
     index += 1
@@ -118,6 +128,15 @@ def _already_injected(text):
         and len(lines) == index + count + 2
         and all(_OUTBOX_LINE.fullmatch(line) is not None for line in lines[index + 1 : -1])
     )
+
+
+def _after_judgment_lines(lines, index):
+    """Return the index past the optional toward lines, in their fixed order, and the how-I-am line."""
+    for toward in desire_judgments.TOWARDS:
+        line = _TOWARD_LINE.fullmatch(lines[index])
+        if line is not None and line["toward"] == toward:
+            index += 1
+    return index + 1 if _HOW_LINE.fullmatch(lines[index]) is not None else index
 
 
 def _after_event_lines(lines, index):
@@ -153,7 +172,9 @@ def _trigger_kind(text):
     return "none"
 
 
-def _build_desire_block(drives, outbox, transport, now, *, returned_hours=None, events=(), unread=0):
+def _build_desire_block(
+    drives, outbox, transport, now, *, returned_hours=None, events=(), unread=0, judgments=None, how=""
+):
     visible = desire_outbox.visible_outbox(outbox, now)
     block = desire_render.serialize_desire_block(
         visible,
@@ -165,6 +186,8 @@ def _build_desire_block(drives, outbox, transport, now, *, returned_hours=None, 
         last_signal_answered_at=drives.get("last_signal_answered_at"),
         events=events,
         unread=unread,
+        judgments=judgments,
+        how=how,
     )
     return block, tuple(item["id"] for item in visible)
 
@@ -225,14 +248,15 @@ def _rewrite(kwargs, event):
 
     state_dir = desire_config.resolve_state_dir()
     text_hash = hashlib.sha256(original_text.encode("utf-8")).hexdigest()
-    cache_key = (str(state_dir.resolve()), text_hash)
+    gate_started = desire_gate_runs.gate_started(original_text, kwargs.get("turn_id") or None)
+    cache_key = (str(state_dir.resolve()), text_hash, gate_started)
 
     cached = _turn_cache
     cache_hit = cached is not None and cached["key"] == cache_key and now - cached["last_hit"] <= _CACHE_TTL
     event["cache_hit"] = cache_hit
     new_turn = cached is None or cached["key"] != cache_key
 
-    events, unread = [], []
+    events, unread, judgments, how = [], [], {}, ""
     initialized = (state_dir / "state.lock").exists() or any(
         (state_dir / name).exists() for name in _STATE_FILES
     )
@@ -243,6 +267,8 @@ def _rewrite(kwargs, event):
             transport = desire_store.read_transport(state_dir)
             if not cache_hit:
                 events, unread = desire_events.events_view_and_unread(state_dir)
+                judgments = {} if gate_started else desire_judgments.present(state_dir)
+                how = desire_judgments.read_how(state_dir)
     else:
         drives = desire_drives.default_drives(now)
         outbox = []
@@ -280,6 +306,8 @@ def _rewrite(kwargs, event):
             returned_hours=returned_hours,
             events=events,
             unread=len(unread),
+            judgments=judgments,
+            how=how,
         )
 
     rewritten = copy.deepcopy(request)
@@ -346,6 +374,7 @@ def _rewrite(kwargs, event):
                         "event": "turn",
                         "trigger": trigger,
                         "platform": _safe_id(kwargs.get("platform")) or "none",
+                        "gate": gate_started,
                     },
                 )
             except Exception:  # noqa: BLE001, S110 - the turn trail must never affect delivery
