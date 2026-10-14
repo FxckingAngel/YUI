@@ -12,14 +12,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { marked } from "marked";
 import { describe, expect, it, vi } from "vitest";
-import { resolvePythonCommand } from "./python-command";
+import { PYTHON } from "./command-paths";
 
 vi.setConfig({ testTimeout: 15_000 });
 
 const ROOT = resolve(__dirname, "..");
 const SKILL_DIR = join(ROOT, "integrations/skills/yui-daily-briefing");
 const SCRIPT = join(SKILL_DIR, "scripts/briefing.py");
-const PYTHON = resolvePythonCommand();
 const GATHER = JSON.parse(readFileSync(join(SKILL_DIR, "assets/fixtures/gather.json"), "utf8"));
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const LOCAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
