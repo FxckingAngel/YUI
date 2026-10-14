@@ -492,7 +492,7 @@ all situational detail still lives in the trigger lines above.
 | `proactive.head_pat` | `(I just patted your head)` |
 | `proactive.drag_held` | `(I keep dragging you around)` |
 | `proactive.window_sit` | `(I just sat you down on a window's edge)` |
-| `proactive.peek` | `(I left you peeking out from the screen edge)` |
+| `proactive.peek` | `(I left you peeking out from the side of a window)` |
 | `proactive.dropped` | `(I just dropped you from mid-air)` |
 | `proactive.screen_app_switched` | `(I just moved over to something else on my screen)` |
 | `proactive.screen_long_session` | `(I've been in the same thing on my screen for a while)` |

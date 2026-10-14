@@ -90,7 +90,7 @@ function createLookTool(
         description:
           "Read the character's state. at: body returns her posture, her window position and " +
           "monitor, the loaded VRM, and whether a move is running. at: perch_targets returns the " +
-          "windows she can sit on — each with app, title and rect — and the screen edges she can " +
+          "windows she can sit on — each with app, title and rect — and the window sides she can " +
           "peek from. at: screen returns a screenshot of the display the character is on, or " +
           "of monitor when given. Screen requests are refused unless the user allows them.",
         parameters: {

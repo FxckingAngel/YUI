@@ -362,7 +362,7 @@ describe("backend_caller — cue context forwarding (trigger.cue)", () => {
   it.each([
     ["proactive.drag_held", "(I keep dragging you around)"],
     ["proactive.window_sit", "(I just sat you down on a window's edge)"],
-    ["proactive.peek", "(I left you peeking out from the screen edge)"],
+    ["proactive.peek", "(I left you peeking out from the side of a window)"],
     ["proactive.head_pat", "(I just patted your head)"],
     ["proactive.dropped", "(I just dropped you from mid-air)"],
   ] as const)("%s user message is its reflex-gesture marker", async (eventName, marker) => {

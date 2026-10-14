@@ -29,7 +29,7 @@ export function backgroundMarker(eventName: string, trigger: TriggerMeta): strin
   if (eventName === "proactive.head_pat") return "(I just patted your head)";
   if (eventName === "proactive.drag_held") return "(I keep dragging you around)";
   if (eventName === "proactive.window_sit") return "(I just sat you down on a window's edge)";
-  if (eventName === "proactive.peek") return "(I left you peeking out from the screen edge)";
+  if (eventName === "proactive.peek") return "(I left you peeking out from the side of a window)";
   if (eventName === "proactive.dropped") return "(I just dropped you from mid-air)";
   if (eventName === "proactive.screen_app_switched") {
     return "(I just moved over to something else on my screen)";
