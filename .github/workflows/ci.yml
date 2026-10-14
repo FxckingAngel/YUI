@@ -27,6 +27,34 @@ jobs:
       - run: pnpm test # vitest run
       - run: pnpm docs:build # vitepress build + dead-link check
 
+  web-windows-python:
+    name: web-windows (Python command + producers)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pnpm install --frozen-lockfile
+      - name: Run producer tests with the default command
+        shell: pwsh
+        run: |
+          Remove-Item Env:YUI_PYTHON -ErrorAction SilentlyContinue
+          pnpm exec vitest run tests/python-command-windows.test.ts tests/yui-daily-briefing-producers.test.ts
+      - name: Run producer tests with an explicit Python override
+        shell: pwsh
+        run: |
+          $python = (& python -c "import sys; print(sys.executable)").Trim()
+          if (-not $python) { throw "Python executable path was empty" }
+          $env:YUI_PYTHON = $python
+          pnpm exec vitest run tests/python-command-windows.test.ts tests/yui-daily-briefing-producers.test.ts
+
   lint:
     name: lint (biome)
     runs-on: ubuntu-latest
