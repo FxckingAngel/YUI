@@ -38,6 +38,7 @@ function fakeSocket() {
   let toolStatusCb: ((frame: ToolStatusFrame) => void) | null = null;
   let toolCallCb: ((frame: ToolCallFrame) => void) | null = null;
   let errorCb: ((frame: ErrorFrame) => void) | null = null;
+  let resetCb: (() => void) | null = null;
   return {
     sendVocabulary: vi.fn(),
     onRender(cb: (frame: RenderFrame) => void) {
@@ -93,6 +94,15 @@ function fakeSocket() {
       return () => {
         errorCb = null;
       };
+    },
+    onReset(cb: () => void) {
+      resetCb = cb;
+      return () => {
+        resetCb = null;
+      };
+    },
+    pushReset(): void {
+      resetCb?.();
     },
     sendToolResult: vi.fn((_frame: ToolResultFrame) => true),
     getMaxTurnBytes: () => undefined,
@@ -605,6 +615,94 @@ describe("wirePushTransport — tool calls", () => {
         result: '{"moving":false}',
       }),
     );
+  });
+
+  it.each<[string, (dispose: () => void) => void]>([
+    ["a cut of its turn", () => void pushTurns.cut()],
+    ["the socket leaving ready", () => socket.pushState({ kind: "reconnecting", delay_ms: 1_000 })],
+    ["a session reset", () => socket.pushReset()],
+    ["disposal", (dispose) => dispose()],
+  ])("aborts a running call's signal on %s", async (_name, act) => {
+    let signal: AbortSignal | undefined;
+    const slow: ClientTool = {
+      ...look,
+      execute: (_args, s) => {
+        signal = s;
+        return new Promise((resolve) =>
+          s?.addEventListener("abort", () => resolve("cancelled: nothing ran")),
+        );
+      },
+    };
+    pushTurns.opened("7", "user.text_submitted");
+    const dispose = wire(turnFeed, [slow]);
+    socket.pushToolCall(frame("c1", "7"));
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    expect(signal?.aborted).toBe(false);
+
+    act(dispose);
+
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("shows a client-run tool's status from its own run; the backend's still counts as a frame", async () => {
+    let finish: ((result: string) => void) | undefined;
+    const browser: ClientTool = {
+      ...look,
+      name: "browser",
+      localStatus: true,
+      statusAction: (args) => String(args.action),
+      execute: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    };
+    pushTurns.opened("7", "user.text_submitted");
+    const onFrame = vi.fn();
+    void pushTurns.awaitTurnEnd("7", { onFrame });
+    wire(turnFeed, [browser]);
+    socket.pushToolCall({ ...frame("c1", "7"), name: "browser", arguments: { action: "read" } });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    socket.pushToolStatus({ type: "tool_status", turn_id: "7", state: "done", tool_id: "browser" });
+
+    expect(toolStatusSink.mock.calls).toEqual([
+      [{ state: "running", tool_id: "browser", action: "read" }],
+    ]);
+    expect(onFrame).toHaveBeenCalledTimes(1);
+
+    finish?.("Untrusted page content from the browser.\n{}");
+    await vi.waitFor(() =>
+      expect(toolStatusSink).toHaveBeenLastCalledWith({
+        state: "done",
+        tool_id: "browser",
+        action: "read",
+      }),
+    );
+  });
+
+  it("a client-run call's terminal state leaves a newer running chip alone", async () => {
+    let finish: ((result: string) => void) | undefined;
+    const browser: ClientTool = {
+      ...look,
+      name: "browser",
+      localStatus: true,
+      execute: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    };
+    wire(turnFeed, [browser]);
+    socket.pushToolCall({ ...frame("c1", "7"), name: "browser", arguments: { action: "read" } });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    socket.pushToolStatus({
+      type: "tool_status",
+      turn_id: "7",
+      state: "running",
+      tool_id: "read_file",
+    });
+    finish?.("cancelled: nothing ran");
+    await vi.waitFor(() => expect(socket.sendToolResult).toHaveBeenCalled());
+
+    expect(toolStatusSink).toHaveBeenLastCalledWith({ state: "running", tool_id: "read_file" });
   });
 
   it("refuses a tool_call of a turn the user cut", () => {

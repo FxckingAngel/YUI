@@ -497,6 +497,15 @@ globalThis.YUI_MAP =
       ]
     },
     {
+      "id": "shell/browser",
+      "module": "shell",
+      "label": "browser",
+      "role": "Launches and owns a dedicated-profile Chrome over loopback CDP, runs one browser action at a time under a generation and a deadline, keeps the current ref table, and stops only the Chrome it started.",
+      "paths": [
+        "src-tauri/src/browser"
+      ]
+    },
+    {
       "id": "shell/window",
       "module": "shell",
       "label": "window control",
@@ -660,9 +669,18 @@ globalThis.YUI_MAP =
       "id": "io/chat/tools",
       "module": "tools",
       "label": "client tools",
-      "role": "The tools the client declares to the backend and runs itself: generate_express, body_action, look.",
+      "role": "The tools the client declares to the backend and runs itself: generate_express, body_action, look, browser.",
       "paths": [
         "src/io/chat/tools"
+      ]
+    },
+    {
+      "id": "io/browser",
+      "module": "tools",
+      "label": "browser shell adapter",
+      "role": "Forwards a browser action to the shell under the generation it was accepted in, cancels accepted calls, and stops the owned Chrome when the switch turns off.",
+      "paths": [
+        "src/io/browser"
       ]
     },
     {
@@ -1056,7 +1074,7 @@ globalThis.YUI_MAP =
       "id": "ui/chips",
       "module": "display",
       "label": "chips",
-      "role": "The status pill, the delegation chip, and the voice-input status model.",
+      "role": "The status pill, which names a client-run tool's action, the delegation chip, and the voice-input status model.",
       "paths": [
         "src/ui/chips"
       ]
@@ -1495,7 +1513,7 @@ globalThis.YUI_MAP =
       "id": "push-feed",
       "from": "io/chat/push",
       "to": "dispatcher/turn",
-      "carries": "tool_status, reasoning → TurnFeed.toolStatus, reasoning",
+      "carries": "tool_status, reasoning → TurnFeed.toolStatus, reasoning; a client-run tool's own running, done, failed by call id, and the backend's tool_status for it dropped",
       "kind": "callback",
       "transport": "push",
       "wiring": "src/app/turn/push/wire-push.ts"
@@ -1653,7 +1671,7 @@ globalThis.YUI_MAP =
       "id": "feed-tool",
       "from": "ui/surfaces",
       "to": "ui/chips",
-      "carries": "showTool, finishTool, hideTool → status pill",
+      "carries": "showTool(toolId, action), finishTool, hideTool → status pill",
       "kind": "callback",
       "transport": "shared",
       "wiring": "src/windows/main.ts"
@@ -1662,7 +1680,7 @@ globalThis.YUI_MAP =
       "id": "feed-surfaces",
       "from": "dispatcher/turn",
       "to": "ui/surfaces",
-      "carries": "TurnFeed.onToolStatus → showTool, finishTool, hideTool",
+      "carries": "TurnFeed.onToolStatus {state, tool_id, action} → showTool, finishTool, hideTool",
       "kind": "callback",
       "transport": "shared",
       "wiring": "src/app/turn/wire-dispatcher.ts"
@@ -1742,7 +1760,7 @@ globalThis.YUI_MAP =
       "id": "tools-push",
       "from": "io/chat/tools",
       "to": "io/chat/push",
-      "carries": "hello.tools: the avatar tools",
+      "carries": "hello.tools: the avatar tools and browser",
       "kind": "callback",
       "transport": "push",
       "wiring": "src/app/turn/push/push-stores.ts"
@@ -1768,7 +1786,7 @@ globalThis.YUI_MAP =
       "id": "stream-tools",
       "from": "io/chat/stream",
       "to": "io/chat/tools",
-      "carries": "runClientCall → executeClientTool(tool, args) → ClientToolResult",
+      "carries": "runClientCall → executeClientTool(tool, args, request signal) → ClientToolResult; tool_status with the call's action",
       "kind": "call",
       "transport": "request"
     },
@@ -1776,7 +1794,7 @@ globalThis.YUI_MAP =
       "id": "push-tools",
       "from": "io/chat/push",
       "to": "io/chat/tools",
-      "carries": "tool_call frame → executeClientTool → tool_result frame",
+      "carries": "tool_call frame → executeClientTool(tool, args, signal aborted on the turn's cut, socket loss, reset, disposal) → tool_result frame",
       "kind": "call",
       "transport": "push"
     },
@@ -1799,10 +1817,45 @@ globalThis.YUI_MAP =
       "wiring": "src/app/bootstrap-configured.ts"
     },
     {
+      "id": "tools-browser",
+      "from": "io/chat/tools",
+      "to": "io/browser",
+      "carries": "browser → shell.run(action, fields, signal) → result string",
+      "kind": "callback",
+      "transport": "shared",
+      "wiring": "src/app/bootstrap-configured.ts"
+    },
+    {
+      "id": "settings-tool-switches",
+      "from": "settings",
+      "to": "io/chat/tools",
+      "carries": "look.screen and browser switches, read when a call runs and when the tools line is built",
+      "kind": "callback",
+      "transport": "shared",
+      "wiring": "src/app/bootstrap-configured.ts"
+    },
+    {
+      "id": "settings-browser",
+      "from": "settings",
+      "to": "io/browser",
+      "carries": "browserSettings off → cancel, browser_stop",
+      "kind": "callback",
+      "transport": "shared",
+      "wiring": "src/app/bootstrap-configured.ts"
+    },
+    {
       "id": "capture-shell",
       "from": "io/window/capture",
       "to": "shell/screenshot",
       "carries": "list_screen_sources, capture_screen, capture_screen_at",
+      "kind": "tauri-command",
+      "transport": "shared"
+    },
+    {
+      "id": "browser-shell",
+      "from": "io/browser",
+      "to": "shell/browser",
+      "carries": "browser_generation, browser_cancel, browser_run {gen, deadlineAt, action, args}, browser_stop",
       "kind": "tauri-command",
       "transport": "shared"
     },

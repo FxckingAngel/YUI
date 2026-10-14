@@ -35,8 +35,11 @@ export function toolResultText(result: ClientToolResult): string {
 export interface ClientTool {
   name: string;
   definition: ClientToolDefinition;
-  /** Runs the call and resolves the text or image result returned to the model. */
-  execute(args: Record<string, unknown>): Promise<ClientToolResult>;
+  /**
+   * Runs the call and resolves the text or image result returned to the model. The signal aborts
+   * when the wait passes or the turn stops; a tool that ignores it runs on.
+   */
+  execute(args: Record<string, unknown>, signal?: AbortSignal): Promise<ClientToolResult>;
   /** The wait the call's execution is bounded by; the execution keeps running past it. */
   waitMs: number;
   /** The switch that gates the tool's execution, read when a call runs; absent on unswitched tools. */
@@ -46,10 +49,20 @@ export interface ClientTool {
    * needs no round trip. A tool that answers a question leaves this unset — its result is the point.
    */
   oneWay?: boolean;
-  /** A wait that passes resolves the bare word `timeout` instead of an error string. */
-  timeoutResult?: "timeout";
+  /** The result a wait that passes resolves instead of an error string naming the seconds. */
+  timeoutResult?(args: Record<string, unknown>): string;
   /** Whether a result reads as a failure; the status pill shows it as failed. Unset: the result starts with `error:`. */
   failed?(result: string): boolean;
+  /** The action the status pill names beside the tool while the call runs. */
+  statusAction?(args: Record<string, unknown>): string | undefined;
+  /** Push shows this tool's status from the client's own run and ignores the backend's `tool_status` naming it. */
+  localStatus?: true;
+}
+
+/** Whether the result reads as a failure of the tool. */
+export function toolFailed(tool: ClientTool, result: ClientToolResult): boolean {
+  const text = toolResultText(result);
+  return tool.failed ? tool.failed(text) : text.startsWith("error:");
 }
 
 export interface ClientToolRegistry {
@@ -72,7 +85,7 @@ export function createClientToolRegistry(tools: readonly ClientTool[]): ClientTo
   };
 }
 
-/** Every tool a window declares: generate_express, then the avatar tools of a window that has an executor. */
+/** Every tool a window declares: generate_express, then the tools of a window that has an executor. */
 export function createClientTools(
   vocab: ExpressVocabulary,
   avatarTools: readonly ClientTool[] = [],

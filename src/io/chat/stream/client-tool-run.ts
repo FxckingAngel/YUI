@@ -5,11 +5,7 @@
  */
 
 import type { ExpressArgs } from "../../../contract";
-import {
-  type ClientToolRegistry,
-  type ClientToolResult,
-  toolResultText,
-} from "../tools/client-tools";
+import { type ClientToolRegistry, type ClientToolResult, toolFailed } from "../tools/client-tools";
 import { executeClientTool } from "../tools/execute";
 import type { ChatStreamEvent } from "./chat-client";
 import { isExpressTool, parseToolArgs } from "./stream-helpers";
@@ -30,13 +26,14 @@ export interface ClientCallOutcome {
  * Parses the call's arguments, plays its express cue on arrival (cue timing never waits for a
  * round trip), and runs the registered tool with a chip for as long as it runs. Arguments that do
  * not parse run nothing and play no cue: the call fails with an error result the model reads.
- * Returns undefined for a call the client does not own, or one with unparseable arguments and no
+ * The request's signal aborts the running tool's. Returns undefined for a call the client does not own, or one with unparseable arguments and no
  * registered tool.
  */
 export async function* runClientCall(
   tools: ClientToolRegistry | undefined,
   name: string,
   argsJson: string,
+  signal?: AbortSignal,
 ): AsyncGenerator<ChatStreamEvent, ClientCallOutcome | undefined> {
   const tool = tools?.get(name);
   const express_call = isExpressTool(name);
@@ -64,21 +61,18 @@ export async function* runClientCall(
   }
   if (!tool) return outcome;
 
-  if (!express_call) yield { type: "tool_status", status: { state: "running", tool_id: name } };
-  const result = await executeClientTool(tool, parsed.args);
+  const action = tool.statusAction?.(parsed.args);
+  if (!express_call)
+    yield { type: "tool_status", status: { state: "running", tool_id: name, action } };
+  const result = await executeClientTool(tool, parsed.args, signal);
   if (!express_call)
     yield {
       type: "tool_status",
-      status: {
-        state: (tool.failed ?? isErrorResult)(toolResultText(result)) ? "failed" : "done",
-        tool_id: name,
-      },
+      status: { state: toolFailed(tool, result) ? "failed" : "done", tool_id: name, action },
     };
   outcome.run = { result, oneWay: tool.oneWay === true };
   return outcome;
 }
-
-const isErrorResult = (result: string): boolean => result.startsWith("error:");
 
 /**
  * Whether the executed calls are answered back. A tool that answers a question always is; cue-only

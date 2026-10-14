@@ -31,6 +31,10 @@ mod voice_import;
 #[cfg(desktop)]
 mod passthrough;
 
+// Dedicated Chrome the `browser` client tool drives over CDP.
+#[cfg(desktop)]
+mod browser;
+
 // Loopback HTTP ingress — receives agent lifecycle signals, re-emits as Tauri events.
 mod agent_ingress;
 
@@ -58,6 +62,12 @@ pub fn run() {
     plugins::register(tauri::Builder::default())
         .setup(setup::run)
         .invoke_handler(commands::handler())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            #[cfg(desktop)]
+            if let tauri::RunEvent::Exit = _event {
+                browser::stop_on_exit(_app);
+            }
+        });
 }
