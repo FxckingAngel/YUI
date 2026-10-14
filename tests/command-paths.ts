@@ -7,4 +7,4 @@ export const BASH =
       join(process.env.ProgramFiles ?? "C:/Program Files", "Git/bin/bash.exe"));
 
 export const PYTHON =
-  process.platform !== "win32" ? "python3" : (process.env.YUI_PYTHON ?? "python");
+  process.env.YUI_PYTHON ?? (process.platform !== "win32" ? "python3" : "python");
