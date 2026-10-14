@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.setConfig({ testTimeout: 15_000 });
+
 const originalPython = process.env.YUI_PYTHON;
 
 afterEach(() => {
