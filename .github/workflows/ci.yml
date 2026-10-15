@@ -33,22 +33,38 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: chg
+        with:
+          filters: |
+            python:
+              - 'integrations/skills/yui-daily-briefing/**'
+              - 'tests/yui-daily-briefing-producers.test.ts'
+              - 'tests/python-command*.ts'
+              - 'tests/command-paths.ts'
+              - '.github/workflows/ci.yml'
       - uses: pnpm/action-setup@v4
+        if: github.event_name != 'pull_request' || steps.chg.outputs.python == 'true'
       - uses: actions/setup-node@v4
+        if: github.event_name != 'pull_request' || steps.chg.outputs.python == 'true'
         with:
           node-version: 22
           cache: pnpm
       - uses: actions/setup-python@v5
+        if: github.event_name != 'pull_request' || steps.chg.outputs.python == 'true'
         with:
           python-version: "3.13"
       - run: pnpm install --frozen-lockfile
+        if: github.event_name != 'pull_request' || steps.chg.outputs.python == 'true'
       - name: Run producer tests with the default command
         shell: pwsh
+        if: github.event_name != 'pull_request' || steps.chg.outputs.python == 'true'
         run: |
           Remove-Item Env:YUI_PYTHON -ErrorAction SilentlyContinue
           pnpm exec vitest run tests/python-command-windows.test.ts tests/yui-daily-briefing-producers.test.ts
       - name: Run producer tests with an explicit Python override
         shell: pwsh
+        if: github.event_name != 'pull_request' || steps.chg.outputs.python == 'true'
         run: |
           $python = (& python -c "import sys; print(sys.executable)").Trim()
           if (-not $python) { throw "Python executable path was empty" }

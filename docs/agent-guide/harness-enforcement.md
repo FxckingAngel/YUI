@@ -12,5 +12,6 @@ Mandatory rules have an enforcement point — the gate, not memory, is the sourc
 | `src/` layer order: a layer imports only from the layers to its left (`AGENTS.md` § Engineering principles) | `lint` CI job (Biome `noRestrictedImports` `patterns`, one `overrides` entry per layer in `biome.json`; `*.test.ts` and `*test-helpers*.ts` are exempt) |
 | Rust format + clippy + test | `rust` CI job; on pull requests, `dorny/paths-filter` runs `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo test` when `src-tauri/**` or `.github/workflows/ci.yml` changes, otherwise the job reports green without the heavy steps |
 | Windows-only Rust sources compile | `rust-windows` CI job (`cargo check` on a Windows runner, gated by the same `paths-filter` as `rust`) |
+| Python command path and briefing producers run on Windows | `web-windows-python` CI job (the Python command path and the briefing producer tests on a Windows runner, with `YUI_PYTHON` unset and then set; gated by `paths-filter` on `integrations/skills/yui-daily-briefing/**`, the test files it runs, and `.github/workflows/ci.yml`) |
 | Runtime verification of UI/DOM/runtime change | PR template Runtime-evidence section |
 | TDD ordering, UI mock approval, current-state docs, worktree runtime assets (`scripts/worktree-setup.sh`) | Working style (no machine gate) |
